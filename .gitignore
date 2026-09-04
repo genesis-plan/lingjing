@@ -1,0 +1,34 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# 虚拟环境 / 隔离依赖目录
+.venv/
+venv/
+env/
+*_pkgs/
+
+# 本机配置 / 密钥
+.env
+.env.local
+*.pem
+*.key
+credentials*.md
+
+# 临时诊断 / 抽取脚本（过程产物）
+_page.js
+_diag*.js
+_*.log
+*.log
+
+# 编辑器与系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

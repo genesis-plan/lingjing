@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-page-node-id="W1Fm9XwKGDE7DKlbTyAgQp">
+<head data-page-node-id="EMCEDggS3ksqloAEMGzac4">
+<meta charset="utf-8" data-page-node-id="ns1nok7cK9ua9pBHqySqqx" />
+<meta name="viewport" content="width=device-width, initial-scale=1" data-page-node-id="k40bcazZl6Tmb2PqaJNz9J" />
+<title>灵境 LingJing · 物理想象力引擎 MVP</title>
+<style>
+  :root { --bg:#0b0e13; --panel:#141922; --line:#232c39; --ink:#e6edf3; --dim:#8b98a9;
+          --ok:#3fb950; --no:#f85149; --acc:#58a6ff; --gold:#d29922; --purple:#bc8cff; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace; }
+  header { padding:12px 18px; border-bottom:1px solid var(--line); display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; }
+  header h1 { font-size:16px; margin:0; }
+  header .tag { font-size:11px; color:var(--dim); }
+  .layout { display:flex; gap:14px; padding:14px 18px; align-items:flex-start; flex-wrap:wrap; }
+  .views { display:flex; gap:10px; flex-wrap:wrap; }
+  .view { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:8px; }
+  .view h3 { font-size:11px; margin:0 0 6px; color:var(--acc); font-weight:600; }
+  .view h3 span { color:var(--dim); font-weight:400; }
+  canvas { background:#05070a; border-radius:5px; display:block; cursor:crosshair; }
+  aside { width:400px; max-width:100%; display:flex; flex-direction:column; gap:10px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
+  .card h2 { font-size:12px; margin:0 0 8px; color:var(--gold); }
+  .card h2.L3 { color:var(--purple); } .card h2.L4 { color:var(--acc); } .card h2.L5 { color:var(--ok); }
+  .kv { display:grid; grid-template-columns:auto 1fr; gap:3px 10px; font-size:11px; }
+  .kv div:nth-child(odd) { color:var(--dim); }
+  .btns { display:flex; gap:8px; flex-wrap:wrap; }
+  button { background:#1c2430; color:var(--ink); border:1px solid var(--line); border-radius:6px;
+           padding:6px 11px; font:inherit; font-size:12px; cursor:pointer; }
+  button:hover { border-color:var(--acc); }
+  button.primary { background:var(--acc); color:#06121f; border-color:var(--acc); }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  #psi { font-size:10px; color:var(--purple); word-break:break-all; line-height:1.4; }
+  #log { height:190px; overflow:auto; font-size:10.5px; line-height:1.55; white-space:pre-wrap; }
+  #log .ok { color:var(--ok); } #log .no { color:var(--no); } #log .h { color:var(--dim); } #log .ad { color:var(--gold); }
+  .warn { color:var(--no); } .good { color:var(--ok); }
+  footer { padding:8px 18px 20px; color:var(--dim); font-size:10.5px; border-top:1px solid var(--line); line-height:1.7; }
+  code { color:var(--gold); }
+</style>
+</head>
+<body data-page-node-id="rL4WHc5Yw1FibCmToK6A89">
+<header data-page-node-id="DCWIWwOFM1MTA3UCeFqdOu">
+  <h1 data-page-node-id="k82UEPC5JyDxifsIUPGttz">灵境 LingJing · 物理想象力引擎</h1>
+  <span class="tag" data-page-node-id="w9jDqLWGm0xCulS9Sc5cSz">MVP v0 — 三维物理现实+时间 · 全息对偶降阶 · 五层闭环（PDE 真算 / POD 真降阶 / 边界真推理）</span>
+</header>
+
+<div class="layout" data-page-node-id="Q4H0tsz9REHW9DrTc1c3jT">
+  <div class="views" data-page-node-id="a5fX4mtuljHI9JWTUsSBK6">
+    <div class="view" data-page-node-id="7MeeDucmnDP9KRDoZngttl"><h3 data-page-node-id="yEkKfsr2BRIBCysQQ0i0An">① 体空间真实场 φ <span data-page-node-id="HID7mONLAe95dqNWKc6bse">（L1/L2 PDE 演化）</span></h3>
+      <canvas id="cv-true" width="320" height="240" data-page-node-id="eDBz3JBGRfbsYKS3wETTEF"></canvas></div>
+    <div class="view" data-page-node-id="p8KdWZwvc5kkiQmtW7z9Jg"><h3 data-page-node-id="upwL1oAqThE1iQmxW1wAwH">② 反向映射重建 φ' <span data-page-node-id="F5B4AdY3zyQOeFDhXLsHGi">（L5 从 r 维边界重建）</span></h3>
+      <canvas id="cv-rec" width="320" height="240" data-page-node-id="9pALdqhPnYxzzPJuzFD2Qd"></canvas></div>
+    <div class="view" data-page-node-id="oFDpvJyYFRXf9NDRD32wZr"><h3 data-page-node-id="DCBLhpqpNQ7XLVJz832Hqz">③ 灵境预演 φ(t+H) <span data-page-node-id="6ApaHWkKFsNkYqpmkpG7C0">（L4 边界预测→回映）</span></h3>
+      <canvas id="cv-pred" width="320" height="240" data-page-node-id="GkGecMPN7H2frlSt3hmdFt"></canvas></div>
+  </div>
+
+  <aside data-page-node-id="JsKEmZbwUKeKzb0tSGqngq">
+    <div class="card" data-page-node-id="WberoBoDIRzrgat7jpwAhR">
+      <h2 data-page-node-id="RIwCwc4cNrFGbRHcDKe4Tj">控制（点击①号画布可放置新热点 → 制造分布外状态）</h2>
+      <div class="btns" data-page-node-id="qNbAaKrdSh4dsXGuBeb6ul">
+        <button id="train" class="primary" data-page-node-id="7MewifcwsedhhCrS10b1hW">① 训练全息映射核</button>
+        <button id="run" disabled data-page-node-id="CjfjWauFxTuWDWwGJsmbKF">▶ 运行闭环</button>
+        <button id="step" disabled data-page-node-id="eC68iedbSCZBCmhqZSOzVW">⏭ 单步</button>
+        <button id="reset" data-page-node-id="vWe4qjL0gAt6gCM3hTm2aB">⟲ 重置</button>
+      </div>
+    </div>
+
+    <div class="card" data-page-node-id="kS1EhgC58liXrm7Klw2Gpo">
+      <h2 data-page-node-id="xjMgx5u8xHYplEHJgfnBD6">L1/L2 物理底座 + 体空间状态</h2>
+      <div class="kv" data-page-node-id="8N7rFLXPZ4HCOPOVMiKJ22">
+        <div data-page-node-id="NyHv1XCWJRSHROwG4tYuxk">物理模型</div><div data-page-node-id="gN58SOmO9TFAmE8H14OGrN">二维热传导 ∂tφ=α∇²φ+s</div>
+        <div data-page-node-id="f5O9ODRNJc6qygtqUE0gGN">自由度 N</div><div data-page-node-id="r61zHsJu2BMEY3sFD5bcHg"><span id="s-N" data-page-node-id="CtbAkDG35yc1pQFzldaoIL">1200</span>（40×30 网格）</div>
+        <div data-page-node-id="QEPKLW6SR2Cd8CyxaVN4y3">场峰值 max</div><div id="s-max" data-page-node-id="BoePQ9iPj2H9aYH3gQYkGL">—</div>
+        <div data-page-node-id="rEU7fGKc5JheDt8cHGDKEH">演化步数</div><div id="s-step" data-page-node-id="bBhwXYGfD8u3uD9jirO88d">0</div>
+      </div>
+    </div>
+
+    <div class="card" data-page-node-id="lMcY70VeSGPzP0AqZd0OWy">
+      <h2 class="L3" data-page-node-id="nv0N32FMeVXSVySiYvX0V3">L3 全息映射 Φ_Holo（POD/SVD）</h2>
+      <div class="kv" data-page-node-id="BhRRgLEmffNQFK60L3CcUo">
+        <div data-page-node-id="FeEAX2FAQaDliZP8toNyyI">状态</div><div id="s-trained" class="warn" data-page-node-id="zEeCmVKAbgrlWN3lN9QDmB">未训练</div>
+        <div data-page-node-id="b8vsGC2qhM0xbSeKlrUp5B">边界维度 r</div><div id="s-r" data-page-node-id="6Hz3QXuUtKJzGzw0rk0dZ5">—</div>
+        <div data-page-node-id="pkE7ca9tBM5hYVrQbBsttN">能量捕获率</div><div id="s-energy" data-page-node-id="81eyMpkXBEmnGmOJxgGm83">—</div>
+        <div data-page-node-id="1VFCG0qfWbcHJqvIxEGNzL">压缩比</div><div id="s-compress" data-page-node-id="teTasaSGVGn4M72MGRPs0M">—</div>
+      </div>
+    </div>
+
+    <div class="card" data-page-node-id="hhGh9wUN2lTtEYXLxqILap">
+      <h2 class="L4" data-page-node-id="8hEs119ZJanwLW7Fluwrvu">L4 边界智能层 ψ ∈ ℝ^r</h2>
+      <div id="psi" data-page-node-id="vWExYaydDBPuK1G2NvDIsa">—</div>
+      <div class="kv" style="margin-top:6px" data-page-node-id="4Hg6avArtbWVUjBlJ6SsQd">
+        <div data-page-node-id="o7Y6kgbD32G8bJTiPE7onJ">预演 H 步后峰值</div><div id="s-predmax" data-page-node-id="CsiBB14WEixioXGVSDKAz3">—</div>
+        <div data-page-node-id="LI2MwlQ7uoIOenNrbnH253">安全阈值</div><div id="s-limit" data-page-node-id="kHDjapGNH4XN8LBl4smB98">0.85</div>
+        <div data-page-node-id="Sxy2GcKo2BpEvShiSnU0sc">FIREWALL 决策</div><div id="s-decision" data-page-node-id="u8uc3UFU7He4EqyBz4jih6">—</div>
+        <div data-page-node-id="M604BA5nVvdlEa7wXNCWYW">灵数控制分配</div><div id="s-control" data-page-node-id="gtM4mx6GsERbMuXpGKHxy5">—</div>
+      </div>
+    </div>
+
+    <div class="card" data-page-node-id="EGBh8iLCC5Oj35ITfDRfTw">
+      <h2 class="L5" data-page-node-id="PAlMufava1GCIStVnvjmXG">L5 反向映射误差（如实显示）</h2>
+      <div class="kv" data-page-node-id="F1Dm7hZNz2qd3ZIsnUUxaN">
+        <div data-page-node-id="2upAxrsqerZIIooVGoWl6w">重建相对 L2 误差</div><div id="s-err" data-page-node-id="BxygltNOm8Hu0qVeew3EWQ">—</div>
+        <div data-page-node-id="o5FWTY2g9jczbLtjaGBRXv">自适应重训练</div><div id="s-adapt" data-page-node-id="1o51GmzmYC0FohP1JsdYOe">0 次</div>
+      </div>
+    </div>
+
+    <div class="card" data-page-node-id="tOe59DrSlDM6vPzpGxAKmO">
+      <h2 data-page-node-id="F6lEtXjFRODBrDvJALMXwc">可审计账本（灵脑 verifyLedger 哈希链）</h2>
+      <div id="log" data-page-node-id="gJccwaF56fR5Bb1HG6tFLI"></div>
+    </div>
+  </aside>
+</div>
+
+<footer data-page-node-id="suedIUjWatExd5ZydfDw8r">
+  <b data-page-node-id="YeM7RyYwzLz6FAGVP7OozS">诚实边界（不吹）：</b>
+  ① <code data-page-node-id="8VJduQU8CZjZvDkJu6qOB9">PDE</code> 每一帧都真解有限差分（不是动画）；<code data-page-node-id="hBlX9IkcH6HyqPI9mWmiUI">POD</code> 真做 SVD，能量捕获与压缩比如实计算；
+  <code data-page-node-id="3JXSZz6GRkHWJbvZq7frlV">边界动力学</code> 真最小二乘拟合。<br data-page-node-id="Lj258x3noQw3PRAPXo42ld">
+  ② <b data-page-node-id="bzXD3cGYitWwcTaSAp1K4I">全息降阶是近似（ROM 真实局限）</b>：训练分布内重建误差约 1–3%，<b data-page-node-id="GcPqFWu5zYxTR3OiGYu8aO">未见状态可高达 ~50%</b>，面板如实显示不做粉饰；框架规定的「偏差超阈值触发重新训练」已实装为自适应机制（点击画布放新热点即可看到误差飙升→自动重训练→误差回落）。<br data-page-node-id="wSQddVrWu6GmBkx1lF4ve2">
+  ③ MVP 仅启用<b data-page-node-id="CcTMFo7AExOiCmCZhZA7Vw">热传导</b>一个物理模型；刚体/弹性/流体/声学/电磁为后续接入。<br data-page-node-id="C1uydCxgFYm15GniPpJ9pB">
+  ④ <code data-page-node-id="wZGG7pFGXZg2Obt3xWhcbx">灵数</code>=真实同源求解（浏览器内 <code data-page-node-id="FmlPNGz1FGfqEhc0f0d5ja">solve</code>，确定性、certified，硬限制 ≤6 变量，此处用于解控制分配方程）；
+  <code data-page-node-id="LwHimrsRqH1TErbHX2eC5u">灵脑决策核</code>=对齐 <code data-page-node-id="LRHsgYk5aVlAUpDKcFNnHX">verifyLedger</code>/<code data-page-node-id="S00tLo2nkE3cUjP0v7eZLe">FIREWALL</code>/<code data-page-node-id="X9W2xn6VMcOJvFV4UkQREs">fail-closed</code> 的最小真实实现（哈希用 cyrb53 演示链），完整灵脑内核（M1–M4、SHA-256+HMAC）见 灵脑.html。
+</footer>
+
+<script src="rom.js"></script>
+<script src="lingshu-core.js"></script>
+<script src="lingnao-decision.js"></script>
+<script>
+(function () {
+  'use strict';
+  const ROM = window.LingJingROM;
+  const DEC = window.LingNaoDecision;
+  const NX = 40, NY = 30, N = NX * NY;
+  const ALPHA = 0.2, DT = 0.5, DX = 1;
+  const R = 8;                 // 边界维度（降阶模态数）
+  const TEMP_LIMIT = 0.85;     // 热安全阈值（灵脑 G5 门）
+  const H_PRED = 6;            // 预演步数
+  const ADAPT_TH = 0.05;       // 自适应重训练触发阈值（重建误差 5%）
+
+  const cvT = document.getElementById('cv-true'), cvR = document.getElementById('cv-rec'), cvP = document.getElementById('cv-pred');
+  const ctxT = cvT.getContext('2d'), ctxR = cvR.getContext('2d'), ctxP = cvP.getContext('2d');
+
+  let world, holo, ledger, A = null, trained = false, steps = 0, adapts = 0, timer = null, psiHist = [];
+
+  function mkWorld() { return new ROM.HeatWorld(NX, NY, { alpha: ALPHA, dt: DT, dx: DX }); }
+
+  function reset() {
+    world = mkWorld();
+    world.init(function (i, j) { return Math.exp(-(((i - 20) ** 2 + (j - 15) ** 2) / 40)); });
+    holo = new ROM.HoloMap(N, 200);
+    ledger = new DEC.VerifyLedger();
+    A = null; trained = false; steps = 0; adapts = 0; psiHist = [];
+    document.getElementById('log').innerHTML = '';
+    set('s-trained', '未训练', 'warn');
+    set('s-r', '—'); set('s-energy', '—'); set('s-compress', '—');
+    set('s-err', '—'); set('s-adapt', '0 次'); set('s-predmax', '—');
+    set('s-decision', '—'); set('s-control', '—'); set('psi', '—');
+    document.getElementById('run').disabled = true;
+    document.getElementById('step').disabled = true;
+    drawAll();
+  }
+
+  function set(id, v, cls) { const e = document.getElementById(id); e.textContent = v; if (cls) e.className = cls; }
+
+  // ---------- 训练：离线收集快照 → POD/SVD 构建全息映射核 ----------
+  function train() {
+    const POS = [[20, 15], [12, 8], [28, 22], [8, 24], [16, 6], [30, 12], [6, 14], [24, 26]];
+    for (const c of POS) {
+      const w = mkWorld();
+      w.init(function (i, j) { return Math.exp(-(((i - c[0]) ** 2 + (j - c[1]) ** 2) / 40)); });
+      for (let t = 0; t < 16; t++) { w.step(); holo.collect(w.field); }
+    }
+    const b = holo.build(R);
+    trained = true;
+    set('s-trained', '已训练（快照 ' + holo.snaps.length + ' 帧）', 'good');
+    set('s-r', String(b.r));
+    set('s-energy', (b.energy * 100).toFixed(2) + '%');
+    set('s-compress', (N / b.r).toFixed(0) + ':1');
+    document.getElementById('run').disabled = false;
+    document.getElementById('step').disabled = false;
+    logLine('L3 全息映射核构建完成：N=' + N + ' → r=' + b.r + '，能量捕获 ' + (b.energy * 100).toFixed(2) + '%，压缩比 ' + (N / b.r).toFixed(0) + ':1', 'h');
+  }
+
+  // ---------- 在线闭环一步 ----------
+  function tick() {
+    if (!trained) return;
+    world.step(); steps++;                                   // L1/L2 物理演化（真 PDE）
+
+    const psi = holo.project(world.field);                   // L3 全息投影 φ → ψ
+    psiHist.push(psi); if (psiHist.length > 60) psiHist.shift();
+
+    let err = holo.reconError(world.field);                  // L5 反向映射误差（如实）
+    const ad = holo.maybeAdapt(world.field, ADAPT_TH, R);    // 自适应重训练（框架 §3）
+    if (ad.adapted) {
+      adapts++; err = ad.errAfter;
+      logLine('⚙ 自适应重训练 #' + adapts + '：误差 ' + (ad.errBefore * 100).toFixed(1) + '% → ' + (ad.errAfter * 100).toFixed(1) + '%', 'ad');
+    }
+
+    if (!A && psiHist.length >= R + 6) {                     // L4 边界动力学拟合
+      const fit = ROM.fitLinear(psiHist);
+      if (fit) { A = fit.A; logLine('L4 边界动力学拟合完成：相对拟合误差 ' + fit.relErr.toExponential(2), 'h'); }
+    }
+
+    let predMax = null, predField = null;                    // L4 预演：边界预测 → 回映体空间
+    if (A) {
+      const seq = ROM.predict(A, psi, H_PRED);
+      predField = holo.reconstruct(seq[seq.length - 1]);
+      predMax = 0; for (let k = 0; k < N; k++) if (predField[k] > predMax) predMax = predField[k];
+    }
+
+    const d = DEC.decide(                                    // 灵脑 FIREWALL + fail-closed
+      { from: 'lingjing-L4', predictedPeak: predMax, H: H_PRED },
+      { power: 1, load: 0, cap: 1, conflict: false, tempMax: predMax, tempLimit: TEMP_LIMIT }
+    );
+
+    let ctl = null;                                          // 超温 → 灵数真解控制分配方程
+    if (!d.approved && typeof solve === 'function') {
+      const P = 0.9, g1 = 0.6, g2 = 0.9;
+      const Q = Math.min(P * g2, Math.max(P * g1, (predMax - TEMP_LIMIT) * 2 + 0.8));
+      const eqs = ['u1 + u2 = ' + P, '(' + g1 + ')*u1 + (' + g2 + ')*u2 = ' + Q.toFixed(6)];
+      try {
+        const res = solve(eqs, ['u1', 'u2'], 6);
+        const s0 = res && res.solutions && res.solutions[0];
+        if (s0 && s0.values) {
+          ctl = { u1: s0.values[0], u2: s0.values[1], certified: !!s0.certified };
+          world.clearSources();                              // L5 反向映射 → 物理动作
+          world.setSource(10, 15, -ctl.u1 * 0.5);
+          world.setSource(30, 15, -ctl.u2 * 0.5);
+        }
+      } catch (e) { /* 灵数不可用时诚实降级：不施加控制 */ }
+    }
+
+    const rec = ledger.append({ step: steps, err: err, predMax: predMax, decision: d, control: ctl });
+    logRec(rec, d, err, predMax, ctl);
+
+    const st = world.stats();
+    set('s-max', st.max.toFixed(4)); set('s-step', String(steps));
+    set('psi', '[' + psi.map(function (x) { return x.toFixed(3); }).join(', ') + ']');
+    set('s-predmax', predMax == null ? '—' : predMax.toFixed(4));
+    set('s-decision', d.approved ? '✓ ALLOW' : '✗ DENY', d.approved ? 'good' : 'warn');
+    set('s-control', ctl ? ('u1=' + ctl.u1.toFixed(3) + ' u2=' + ctl.u2.toFixed(3) + (ctl.certified ? ' ✓cert' : '')) : '—');
+    set('s-err', (err * 100).toFixed(2) + '%', err < 0.05 ? 'good' : 'warn');
+    set('s-adapt', adapts + ' 次');
+
+    drawAll(holo.reconstruct(psi), predField);
+  }
+
+  // ---------- 渲染 ----------
+  function heatColor(t) {
+    t = Math.max(0, Math.min(1, t));
+    return 'hsl(' + ((1 - t) * 240).toFixed(0) + ',95%,' + (12 + t * 38).toFixed(0) + '%)';
+  }
+  function draw(ctx, field, scaleMax) {
+    if (!field) { ctx.clearRect(0, 0, 320, 240); return; }
+    const cw = 320 / NX, ch = 240 / NY;
+    for (let j = 0; j < NY; j++) for (let i = 0; i < NX; i++) {
+      ctx.fillStyle = heatColor((field[j * NX + i] || 0) / (scaleMax || 1));
+      ctx.fillRect(i * cw, j * ch, cw + 0.6, ch + 0.6);
+    }
+  }
+  function drawAll(recField, predField) {
+    const m = Math.max(0.35, world.stats().max);
+    draw(ctxT, world.field, m); draw(ctxR, recField, m); draw(ctxP, predField, m);
+  }
+
+  function logLine(text, cls) {
+    const box = document.getElementById('log');
+    const div = document.createElement('div');
+    div.className = cls || ''; div.textContent = text;
+    box.appendChild(div); box.scrollTop = box.scrollHeight;
+  }
+  function logRec(rec, d, err, predMax, ctl) {
+    const box = document.getElementById('log');
+    const div = document.createElement('div');
+    div.innerHTML = '<span class="h">#' + rec.seq + ' ' + rec.hash.slice(0, 8) + '</span> ' +
+      '<span class="' + (d.approved ? 'ok' : 'no') + '">' + (d.approved ? '✓ 批准' : '✗ 拒绝') + '</span> ' +
+      '预演峰值=' + (predMax == null ? '—' : predMax.toFixed(3)) + ' 重建误差=' + (err * 100).toFixed(1) + '%' +
+      (ctl ? ' 灵数u=(' + ctl.u1.toFixed(2) + ',' + ctl.u2.toFixed(2) + ')' : '') +
+      '\n  <span class="' + (d.approved ? 'ok' : 'no') + '">' + d.reason + '</span>';
+    box.appendChild(div); box.scrollTop = box.scrollHeight;
+  }
+
+  document.getElementById('train').onclick = train;
+  document.getElementById('run').onclick = function () {
+    if (timer) { clearInterval(timer); timer = null; this.textContent = '▶ 运行闭环'; }
+    else { timer = setInterval(tick, 260); this.textContent = '⏸ 暂停'; }
+  };
+  document.getElementById('step').onclick = tick;
+  document.getElementById('reset').onclick = function () {
+    if (timer) { clearInterval(timer); timer = null; document.getElementById('run').textContent = '▶ 运行闭环'; }
+    reset();
+  };
+  cvT.onclick = function (e) {                                // 放置新热点 → 制造分布外状态
+    const r = cvT.getBoundingClientRect();
+    const i = Math.floor((e.clientX - r.left) / r.width * NX);
+    const j = Math.floor((e.clientY - r.top) / r.height * NY);
+    for (let jj = Math.max(1, j - 2); jj <= Math.min(NY - 2, j + 2); jj++)
+      for (let ii = Math.max(1, i - 2); ii <= Math.min(NX - 2, i + 2); ii++)
+        world.field[jj * NX + ii] += Math.exp(-(((ii - i) ** 2 + (jj - j) ** 2) / 4));
+    logLine('◆ 在 (' + i + ',' + j + ') 放置新热点 —— 制造训练分布外状态', 'ad');
+    if (trained) logLine('  当前重建误差 ' + (holo.reconError(world.field) * 100).toFixed(1) + '%（ROM 分布外局限，如实显示）', 'ad');
+    drawAll();
+  };
+
+  reset();
+})();
+</script>
+</body>
+</html>
