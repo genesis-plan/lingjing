@@ -133,6 +133,89 @@
     }
   }
 
+  /**
+   * 三维热传导：∂tφ = α∇²φ + s
+   * 显式 FTCS 七点格式；稳定条件 α·dt/dx² ≤ 1/6（3D，比 2D 的 1/4 更严）。
+   * 展平序 idx(i,j,k) = (k*ny + j)*nx + i，与 NumPy (nz,ny,nx) 的 C 序一致。
+   *
+   * 与 2D 版的一处【刻意不同】：2D 版 JS 的 init() 不施加边界、要等第一次 step()，
+   * 而 Python 版 init() 立即施加，导致交叉验证初始 mean 差 1e-4（README §5 已记）。
+   * 3D 版两轨统一在 init() 就施加边界——初值本应满足边界条件，这是更正确的做法，
+   * 故 3D 的 JS/Python 交叉验证从 t=0 起即逐位可比。
+   */
+  class HeatWorld3D {
+    constructor(nx, ny, nz, opts) {
+      const o = opts || {};
+      this.nx = nx; this.ny = ny; this.nz = nz; this.N = nx * ny * nz;
+      this.alpha = o.alpha != null ? o.alpha : 0.2;
+      this.dt = o.dt != null ? o.dt : 0.5;
+      this.dx = o.dx != null ? o.dx : 1;
+      this.boundary = o.boundary != null ? o.boundary : 0;
+      this.lam = this.alpha * this.dt / (this.dx * this.dx);
+      if (this.lam > 1 / 6) {
+        throw new Error('CFL 不稳定：α·dt/dx² = ' + this.lam.toFixed(4) + ' > 1/6（3D 显式 FTCS 上限）。请调小 dt 或 alpha。');
+      }
+      this.field = new Float64Array(this.N);
+      this.sources = new Float64Array(this.N);
+      this._buf = new Float64Array(this.N);
+      this.time = 0;
+    }
+    idx(i, j, k) { return (k * this.ny + j) * this.nx + i; }
+    /** 初始场 f(i,j,k) -> value；两轨统一在 init 施加边界 */
+    init(f) {
+      const { nx, ny, nz } = this;
+      for (let k = 0; k < nz; k++) for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+        this.field[this.idx(i, j, k)] = f(i, j, k);
+      }
+      this._applyBoundary();
+      return this.field;
+    }
+    /** 源/汇（正值加热，负值冷却） */
+    setSource(i, j, k, v) {
+      if (i >= 0 && i < this.nx && j >= 0 && j < this.ny && k >= 0 && k < this.nz) this.sources[this.idx(i, j, k)] = v;
+    }
+    clearSources() { this.sources.fill(0); }
+    _applyBoundary() {
+      const { nx, ny, nz, boundary } = this, f = this.field;
+      for (let k = 0; k < nz; k++) for (let j = 0; j < ny; j++) {
+        f[this.idx(0, j, k)] = boundary; f[this.idx(nx - 1, j, k)] = boundary;
+      }
+      for (let k = 0; k < nz; k++) for (let i = 0; i < nx; i++) {
+        f[this.idx(i, 0, k)] = boundary; f[this.idx(i, ny - 1, k)] = boundary;
+      }
+      for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+        f[this.idx(i, j, 0)] = boundary; f[this.idx(i, j, nz - 1)] = boundary;
+      }
+    }
+    /** 推进一步（L1 物理演化，七点格式） */
+    step() {
+      const { nx, ny, nz, lam, dt, field, _buf, sources, boundary } = this;
+      const stride_y = nx, stride_z = nx * ny;
+      for (let k = 0; k < nz; k++) {
+        for (let j = 0; j < ny; j++) {
+          for (let i = 0; i < nx; i++) {
+            const p = (k * ny + j) * nx + i;
+            if (i === 0 || j === 0 || k === 0 || i === nx - 1 || j === ny - 1 || k === nz - 1) { _buf[p] = boundary; continue; }
+            const c = field[p];
+            const s = field[p - 1] + field[p + 1] + field[p - stride_y] + field[p + stride_y] + field[p - stride_z] + field[p + stride_z];
+            _buf[p] = c + lam * (s - 6 * c) + dt * sources[p];
+          }
+        }
+      }
+      this.field.set(_buf);
+      this.time += dt;
+      return this.field;
+    }
+    stats() {
+      let mx = -Infinity, mn = Infinity, sum = 0;
+      for (let k = 0; k < this.N; k++) { const v = this.field[k]; if (v > mx) mx = v; if (v < mn) mn = v; sum += v; }
+      return { max: mx, min: mn, mean: sum / this.N };
+    }
+    /** 取 z=k 的切片（返回 nx*ny 的 Float64Array，行序 j） */
+    sliceZ(k) { return this.field.subarray(k * this.ny * this.nx, (k + 1) * this.ny * this.nx); }
+    flat() { return this.field; }
+  }
+
   // ==================== L3：全息映射（POD/SVD 降阶） ====================
 
   /**
@@ -210,6 +293,37 @@
       let tot = 0; for (let i = 0; i < this.allLambda.length; i++) tot += this.allLambda[i];
       let got = 0; for (let i = 0; i < this.lambda.length; i++) got += this.lambda[i];
       return tot > 0 ? got / tot : 0;
+    }
+    /**
+     * 有效秩：λ_m > λ_max·tol 的模态个数（默认 tol=1e-6）。
+     * 为什么必须报这个数：能量捕获率对【数值噪声模态】不敏感——一批高度相关的快照
+     * 会让谱在某处断崖，此后补进的模态纯属噪声却仍算"已捕获"，使百分比逼近 100%，
+     * 好看却无表示能力。Python 版有同款 effective_rank()，此处为双轨可比而补齐。
+     */
+    effectiveRank(tol) {
+      if (!this.allLambda || !this.allLambda.length) return 0;
+      const t = tol == null ? 1e-6 : tol;
+      const lamMax = this.allLambda[0];
+      if (!(lamMax > 0)) return 0;
+      let n = 0;
+      for (let i = 0; i < this.allLambda.length; i++) if (this.allLambda[i] > lamMax * t) n++;
+      return n;
+    }
+    /** 谱断崖位置：第一个 λ_{m+1}/λ_m < 1/factor 的索引 m+1；无断崖返回 -1。 */
+    cliffIndex(factor) {
+      if (!this.allLambda || this.allLambda.length < 2) return -1;
+      const f = factor == null ? 1e3 : factor;
+      const lam = this.allLambda.filter(function (v) { return v > 0; });
+      for (let m = 0; m < lam.length - 1; m++) {
+        if (lam[m + 1] / lam[m] < 1 / f) return m + 1;
+      }
+      return -1;
+    }
+    /** 相对谱 λ_m/λ_0（降序），断崖一眼可见。 */
+    spectrumRatios() {
+      if (!this.allLambda || !this.allLambda.length) return null;
+      const l0 = this.allLambda[0];
+      return l0 > 0 ? this.allLambda.map(function (v) { return v / l0; }) : null;
     }
     /** L3 投影：φ -> ψ（低维边界） */
     project(phi) {
@@ -299,5 +413,73 @@
     return seq;
   }
 
-  return { jacobiEigen, gaussSolve, HeatWorld, HoloMap, fitLinear, predict };
+  /**
+   * 仿射拟合：ψ_{t+1} = A ψ_t + b
+   *
+   * 为什么必须有这一版：ψ = Φᵀ(φ − φ̄) 含【减均值】，故即使物理演化 φ_{t+1}=Mφ_t
+   * 是严格线性的，投影后的低维动力学也是仿射的：
+   *     ψ_{t+1} = ΦᵀMΦ·ψ_t + Φᵀ(Mφ̄ − φ̄)      ← 第二项（均值漂移）一般非零
+   * 只拟合 A（fitLinear）会系统性欠拟合。实测本场景：线性拟合残差 1.5e-1、
+   * 6 步预测误差 79%；改仿射后残差降到机器精度级，多步预测随之可用。
+   *
+   * 返回 {A (r×(r+1)，最后一列即 b), r, rms, relErr}
+   */
+  function fitAffine(psiSeq) {
+    const T = psiSeq.length, r = psiSeq[0].length;
+    if (T < r + 3) return null;
+    const d = r + 1;
+    const M = [];
+    for (let a = 0; a < d; a++) {
+      const row = new Array(d).fill(0);
+      for (let b = 0; b < d; b++) {
+        let s = 0;
+        for (let t = 0; t < T - 1; t++) {
+          const xa = a < r ? psiSeq[t][a] : 1, xb = b < r ? psiSeq[t][b] : 1;
+          s += xa * xb;
+        }
+        row[b] = s;
+      }
+      M.push(row);
+    }
+    const A = [];
+    let resid = 0;
+    for (let o = 0; o < r; o++) {
+      const rhs = new Array(d).fill(0);
+      for (let a = 0; a < d; a++) {
+        let s = 0;
+        for (let t = 0; t < T - 1; t++) { const xa = a < r ? psiSeq[t][a] : 1; s += xa * psiSeq[t + 1][o]; }
+        rhs[a] = s;
+      }
+      const sol = gaussSolve(M.map(row => row.slice()), rhs);
+      if (!sol) { A.push(new Array(d).fill(0)); continue; }
+      A.push(sol);
+      for (let t = 0; t < T - 1; t++) {
+        let p = sol[r];
+        for (let a = 0; a < r; a++) p += sol[a] * psiSeq[t][a];
+        const e = p - psiSeq[t + 1][o]; resid += e * e;
+      }
+    }
+    let scale = 0;
+    for (let t = 1; t < T; t++) for (let o = 0; o < r; o++) scale += psiSeq[t][o] * psiSeq[t][o];
+    return { A, r, affine: true, rms: Math.sqrt(resid / Math.max(T - 1, 1)), relErr: scale > 0 ? Math.sqrt(resid / scale) : 0 };
+  }
+
+  /** 用仿射模型做多步预测：ψ_t, ψ_{t+1}, ... */
+  function predictAffine(A, psi0, steps) {
+    const r = psi0.length;
+    const seq = [psi0.slice()];
+    let cur = psi0.slice();
+    for (let s = 0; s < steps; s++) {
+      const nxt = new Array(r).fill(0);
+      for (let o = 0; o < A.length; o++) {
+        let v = A[o][r];
+        for (let a = 0; a < r; a++) v += A[o][a] * cur[a];
+        nxt[o] = v;
+      }
+      seq.push(nxt); cur = nxt;
+    }
+    return seq;
+  }
+
+  return { jacobiEigen, gaussSolve, HeatWorld, HeatWorld3D, HoloMap, fitLinear, fitAffine, predict, predictAffine };
 });

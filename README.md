@@ -24,10 +24,10 @@
 
 | 层 | 名称 | 数学对象 | 本仓库实现 |
 | :--- | :--- | :--- | :--- |
-| 1 | 物理底座 | \(\mathcal{M}_{3,1} + \mathcal{E}_{\text{PDE}}\) | `rom.js` / `lingjing_rom.py` — 二维热传导 PDE |
-| 2 | 体空间状态 | \(\phi(t,\mathbf{x})\) | `HeatWorld`（FTCS 显式步进） |
+| 1 | 物理底座 | \(\mathcal{M}_{3,1} + \mathcal{E}_{\text{PDE}}\) | `rom.js` / `lingjing_rom.py` — 二维 **与三维**热传导 PDE |
+| 2 | 体空间状态 | \(\phi(t,\mathbf{x})\) | `HeatWorld`（2D FTCS） / `HeatWorld3D`（3D 七点 FTCS） |
 | 3 | 全息映射 | \(\Phi_{\text{Holo}}: \phi \mapsto \psi\) | `HoloMap.build()` — POD/SVD 降阶 |
-| 4 | 边界智能层 | \(\mathcal{I}(\psi) \mapsto \psi'\) | `fit_linear()` / `predict()` + 灵脑决策核 |
+| 4 | 边界智能层 | \(\mathcal{I}(\psi) \mapsto \psi'\) | `fit_linear()` / `fit_affine()` + `predict()` / `predict_affine()` + 灵脑决策核 |
 | 5 | 反向映射 | \(\Phi_{\text{Holo}}^{-1}: \psi' \mapsto \phi'\) | `HoloMap.reconstruct()` |
 
 **闭环**：感知 → 体状态更新 → 全息投影 → 边界推理 → 反向映射 → 行动 → 反馈。
@@ -42,7 +42,7 @@
 | :--- | :--- | :--- |
 | 核心数学 | `rom.js` | `lingjing_rom.py` |
 | 演示界面 | `index.html`（三视图 + 审计面板，双击即开） | — |
-| 验真 | `verify.js` | `verify.py` |
+| 验真 | `verify.js`（2D） / `verify3d.js`（三维） | `verify.py`（2D） / `verify3d.py`（三维） |
 | 决策核 | `lingnao-decision.js` | 内置 `VerifyLedger` / `decide` |
 | SVD 后端 | 手写 Jacobi 旋转 | **LAPACK**（`np.linalg.eigh`） |
 | 规模上限 | N≈1200 已吃力 | **N=30000 仅 92ms** |
@@ -57,7 +57,8 @@
 
 ```bash
 pip install numpy
-python verify.py
+python verify.py        # 2D 五层验真
+python verify3d.py      # 三维验真（与 JS 轨逐项对照）
 ```
 
 可选接入真灵数求解器（lingshu-solver，JS 实现，经子进程调用）：
@@ -73,7 +74,8 @@ python verify.py
 ### JS 版（浏览器演示）
 
 ```bash
-node verify.js          # 命令行验真
+node verify.js          # 命令行验真（2D）
+node verify3d.js        # 三维验真（20×20×20）
 # 或直接用浏览器打开 index.html
 ```
 
@@ -94,6 +96,28 @@ node verify.js          # 命令行验真
 | 控制分配方程解 | u1=0.933333 u2=0.266667 | 同（一致） |
 | 灵数认证 | `certified=true` | 经子进程调用同一实现 |
 
+### 三维热传导（\(\mathcal{M}_{3,1}\) 首个真三维切片）
+
+`verify3d.js` / `verify3d.py`：20×20×20 = **8000 自由度**（上一节 2D 为 1200），
+α=0.2、dt=0.5、dx=1（λ=0.1，3D CFL 上限 1/6≈0.1667），中心高斯热点（σ=3），
+训练 40 步每 2 步取 1 张快照建基（r=8），测试段 20 步**基未见过**。
+
+| 指标 | JS 版 | Python 版 |
+| :--- | :--- | :--- |
+| L1 训练段末 t=40 | max=0.376776 mean=0.046475 | 同（一致） |
+| L3 能量捕获率 / 压缩比 | 100.0000% / **1000:1** | 同（一致） |
+| L3 有效秩 | **3**（r=8 中仅 3 个有信息量） | 同（一致） |
+| L5 重建误差 · 分布内（留出） | 0.0068% | 0.0015% |
+| L5 重建误差 · 分布外 | 90.7178% | 90.7164% |
+| L5 自适应后 · 另一 OOD 状态 | 88.0146% | 88.0116% |
+| L4 纯线性 6 步预测误差 | 7.8698e-1（**欠拟合**） | 7.8676e-1 |
+| L4 **仿射** 6 步预测误差 | **3.5110e-9** | **3.4281e-9** |
+
+> 注：JS / Python 在 r=8 的分布内重建误差差约 4.5 倍（0.0068% vs 0.0015%）。
+> r 扫描已确认 r≤6 时两轨**逐位一致**（6 位小数）；r=8 的差异出现在 1e-5 量级——
+> 有效秩只有 3，第 7、8 个模态是数值噪声方向，手写 Jacobi 与 LAPACK 在近零空间取向不同。
+> 属**已知且无信息量**的差异，不是 bug。
+
 ---
 
 ## 五、诚实边界（请务必读）
@@ -101,15 +125,27 @@ node verify.js          # 命令行验真
 这些是**真实的局限**，不是免责声明：
 
 1. **MVP 仅启用热传导一个 PDE**。刚体 / 弹性 / 流体 / 声学 / 电磁是框架预置模型，尚未实现。
-2. **当前是 2D + 时间，不是完整的 \(\mathcal{M}_{3,1}\)**。
-3. **ROM 是近似，重建有误差**。分布外状态误差可达 **~50%**——这是降阶模型的真实泛化局限，不是 bug。
-   本仓库提供**自适应重训练**（`maybeAdapt()`，对应框架 §3）来缓解，但无法根治。
+2. **三维已启用，但仍是"一个 PDE 的三维"，不是完整的 \(\mathcal{M}_{3,1}\)**。
+   三维热传导（20³=8000 自由度）已实装并双轨验真（`HeatWorld3D` + `verify3d.*`），
+   但只有各向同性常系数热传导一种物理；刚体 / 弹性 / 流体 / 声学 / 电磁仍是框架预置、未实现，
+   也没有自适应网格、没有复杂几何边界（目前只有 Dirichlet 零边界）。
+3. **ROM 是近似，重建有误差**。分布外状态误差在 2D 场景约 **~50%**、三维场景约 **~90%**——
+   这是降阶模型的真实泛化局限，不是 bug（三维热点位移后，8 个基向量几乎无法表示新位置）。
+   本仓库提供**自适应重训练**（`maybeAdapt()`，对应框架 §3）缓解，但无法根治：
+   实测"自适应后重建同一状态"误差为 0.0000%，那只是把该状态**吸收进基**（记忆），
+   对**另一个**未见 OOD 状态仍是 88.0%——**只有后者才是泛化指标**，验真脚本两个都报，别只引好看的那个。
 4. **能量捕获率必须和谱形态一起看**。能量捕获率对数值噪声模态不敏感：一批高度相关的快照会让谱断崖（如 λ 从 1e2 跌到 1e-3），此后补进的模态是噪声却仍算"已捕获"，百分比逼近 100% 而真实表示能力很低。
    因此内核提供 `effective_rank()` / `cliff_index()` / `spectrum_ratios()`——**别只看百分比**。
 5. **灵脑决策核是"对齐概念的最小真实现"**：实现了 `verifyLedger` 哈希链、`FIREWALL` 信任门、`fail-closed` 三条灵魂不变量，
    但**不是**完整灵脑内核（无八元组 BrainTuple、无 M1–M4 证明模块、JS 版哈希为 cyrb53 演示级）。
 6. **灵数求解器（lingshu-solver）是 JS 实现，Python 侧无对应物**。
    本仓库不假装有——未配置时用 NumPy 求解并明确标注"非灵数区间认证解"。
+7. **边界动力学必须是"仿射"的，只拟合线性会系统性欠拟合**。
+   POD 投影 \(\psi = \Phi^\top(\phi-\bar\phi)\) 因减均值引入常数项，真实关系是 \(\psi_{t+1}=A\psi_t+b\)。
+   三维验真实测：只拟合 \(A\) 时 6 步预测误差 **7.87e-1（≈79%）**，加入偏置 \(b\) 后降到 **3.5e-9**。
+   这不是调参问题，是模型错配——`fitAffine()` / `fit_affine()` 才是正确用法。
+8. **三维当前用的是显式 FTCS，受 CFL 硬约束** \(\alpha\Delta t/\Delta x^2 \le 1/6\)。
+   想加大时间步就必须换隐式格式（尚未实现），否则内核会**直接拒绝启动**并抛错（fail-closed）。
 
 ### 已知的跨版本语义差异（未强行迁就）
 
@@ -125,8 +161,10 @@ Python 版 `HeatWorld.init()` 立即施加 Dirichlet 边界；JS 版 `init()` �
 | :--- | :--- |
 | `lingjing_rom.py` | 五层核心数学（Python / NumPy 版，唯一第三方依赖 numpy） |
 | `verify.py` | Python 验真：五层 + 篡改检测 + 规模扩展 |
-| `rom.js` | 五层核心数学（JS 版，UMD） |
-| `verify.js` | Node 验真 |
+| `rom.js` | 五层核心数学（JS 版，UMD）；含 `HeatWorld3D` / `fitAffine` / `predictAffine` |
+| `verify.js` | Node 验真（2D） |
+| `verify3d.js` | Node 验真（三维，20³=8000 自由度） |
+| `verify3d.py` | Python 验真（三维，与 JS 逐项对照） |
 | `index.html` | 浏览器演示：真场 / 重建场 / 预演场三视图 + 五层状态 + 审计账本 |
 | `lingnao-decision.js` | 灵脑风格可审计决策核（哈希链 + FIREWALL + fail-closed） |
 | `lingshu-core.js` | 灵数求解器核心（源自 `genesis-plan/lingshu-solver`，同属版权方） |
@@ -146,7 +184,9 @@ Python 版 `HeatWorld.init()` 立即施加 Dirichlet 边界；JS 版 `init()` �
 
 ## 八、路线（待版权方拍板）
 
-- [ ] 扩展到三维 \(\mathcal{M}_{3,1}\)（当前 2D + 时间）
+- [x] 扩展到三维 \(\mathcal{M}_{3,1}\)——**已落**：`HeatWorld3D` 双轨 + `verify3d.*` 验真（20³=8000 自由度）
+- [ ] 三维可视化（浏览器切片/等值面渲染，目前只有 `sliceZ()` 数值接口）
+- [ ] 三维场景的第二个 PDE（弹性 / 流体），验证框架通用性
 - [ ] 接入第二个 PDE 模型（弹性 / 流体），验证框架通用性
 - [ ] 接入完整灵脑内核（八元组、M1–M4 证明模块、SHA-256+HMAC 单写者账本）
 - [ ] 打包为可分发的 `lingjing-rom`（PyPI / npm）
