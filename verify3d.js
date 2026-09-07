@@ -61,6 +61,9 @@ console.log(`  L3 有效秩=${holo.effectiveRank()}  谱断崖位置=${holo.clif
 
 // 训练段上的 psi 序列（L4 用），必须是【不同时刻】的真序列
 for (const s of holo.snaps) { const p = holo.project(s); if (p) psiSeq.push(p); }
+// ★ 留存一份"干净"训练快照：下面分布外/自适应实验会【故意污染 holo】（把 OOD 帧吸收进基），
+//   L4 必须在干净基上测，否则会被污染基带偏（曾据此误报 4.7e-1）。
+const trainSnaps = holo.snaps.map(function (s) { return s.slice(); });
 
 // ==================== L5：分布内【留出】测试 ====================
 for (let t = 0; t < TEST_STEPS; t++) w.step();
@@ -87,19 +90,50 @@ const errOtherAfter = holo.reconError(wOOD2.flat());
 console.log(`  L5 自适应后·同状态         = ${(errSameAfter * 100).toFixed(4)}%（吸收进基，属记忆非泛化）`);
 console.log(`  L5 自适应后·另一 OOD 状态 = ${(errOtherAfter * 100).toFixed(4)}%（这才是泛化）`);
 
-// ==================== L4：边界低维动力学（线性 vs 仿射 对照） ====================
-const fit = fitLinear(psiSeq);
+// ==================== L4：边界低维动力学（线性 vs 仿射；样本内 vs 样本外） ====================
+/* ⚠️ 方法学（这里踩过两个坑，写在这里防止复发）
+   坑 1 · 背答案：早期版本用 predictAffine(A, psiSeq[0], H) 去比 psiSeq[H]——
+          起点和终点【都是训练快照】，本质是样本内复现，误差 1e-9 量级毫无预测意义。
+          现已改为【样本外自由演化】：从训练段末状态出发，向基从未见过的未来递推。
+   坑 2 · 跨距错配：快照每 SNAP_EVERY 个物理步存一张 ⇒ 拟合出的 A 是"两步映射"。
+          递推 1 次必须走 SNAP_EVERY 个物理步；若按 1 步递推，等于让预测跑双倍速，
+          误差会虚高到 1e-1 量级（曾据此误判"模型不行"，实为脚本 bug）。
+   结论口径：L4 误差应当与 L5 投影底线同量级——边界预测本身几乎不引入额外误差。 */
+// 用干净基重建（此时 holo 已被自适应当作实验污染）
+const holoL4 = new HoloMap(w.N, 200);
+for (const s of trainSnaps) holoL4.collect(s.slice());
+holoL4.build(R);
+const seqL4 = holoL4.snaps.map(function (s) { return holoL4.project(s); });
+const fit = fitLinear(seqL4);
+const fitA = fitAffine(seqL4);
+
+// ---- 样本内（背答案，仅作对照，不得用于对外宣称）----
+if (fit) console.log(`  L4 线性拟合 残差(样本内)     = ${fit.relErr.toExponential(4)}`);
+console.log(`  L4 仿射拟合 残差(样本内)     = ${fitA.relErr.toExponential(4)}`);
 if (fit) {
-  const pred = predict(fit.A, psiSeq[0], H);
-  console.log(`  L4 线性拟合 残差        = ${fit.relErr.toExponential(4)}`);
-  console.log(`  L4 线性 ${H} 步预测误差     = ${relErr(pred[H], psiSeq[H]).toExponential(4)}`);
+  const predIn = predict(fit.A, psiSeq[0], H);
+  console.log(`  L4 线性 ${H} 步(样本内/背答案) = ${relErr(predIn[H], psiSeq[H]).toExponential(4)}`);
 }
-const fitA = fitAffine(psiSeq);
-if (fitA) {
-  const predA = predictAffine(fitA.A, psiSeq[0], H);
-  console.log(`  L4 仿射拟合 残差        = ${fitA.relErr.toExponential(4)}`);
-  console.log(`  L4 仿射 ${H} 步预测误差     = ${relErr(predA[H], psiSeq[H]).toExponential(4)}`);
-  console.log(`  L4 仿射 ${H} 步预测范数     = ${norm(predA[H]).toExponential(4)}（实际 ${norm(psiSeq[H]).toExponential(4)}）`);
+const predInA = predictAffine(fitA.A, psiSeq[0], H);
+console.log(`  L4 仿射 ${H} 步(样本内/背答案) = ${relErr(predInA[H], psiSeq[H]).toExponential(4)}`);
+
+// ---- 样本外自由演化（这才是真正的预测）----
+const w4 = new HeatWorld3D(N, N, N, OPTS);
+w4.init(hotSpot(CENTER, CENTER, CENTER));
+for (let t = 0; t < TRAIN_STEPS; t++) w4.step();   // 推进到训练段末 t=TRAIN_STEPS
+let psiL = holoL4.project(w4.flat());
+let psiA = holoL4.project(w4.flat());
+for (let blk = 0; blk < H; blk++) {
+  for (let q = 0; q < SNAP_EVERY; q++) w4.step();  // 跨距严格对齐
+  if (fit) psiL = predict(fit.A, psiL, 1)[1];
+  psiA = predictAffine(fitA.A, psiA, 1)[1];
 }
+const truthH = w4.flat();
+const floorH = holoL4.reconError(truthH);          // L5 投影底线（同 horizon）
+if (fit) {
+  console.log(`  L4 线性 ${H} 步(样本外/真预测) = ${relErr(Array.from(holoL4.reconstruct(psiL)), Array.from(truthH)).toExponential(4)}`);
+}
+console.log(`  L4 仿射 ${H} 步(样本外/真预测) = ${relErr(Array.from(holoL4.reconstruct(psiA)), Array.from(truthH)).toExponential(4)}`);
+console.log(`  L5 投影底线(同 horizon)      = ${(floorH * 100).toFixed(4)}%（L4 应与之同量级）`);
 
 console.log('=== JS 轨结束 ===');

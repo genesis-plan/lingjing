@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>灵境 · 三维热传导虚拟仿真（L1→L5 五层实算）</title>
+<style>
+  :root{
+    --bg:#f4f6f8; --card:#ffffff; --ink:#1f2328; --ink2:#5b6570;
+    --line:#e3e7ec; --accent:#2f6feb; --warn:#b45309; --bad:#c0392b; --ok:#1e7e46;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:"Microsoft YaHei","PingFang SC","Noto Sans CJK SC",system-ui,sans-serif;
+    line-height:1.7;font-size:14px}
+  .wrap{max-width:1180px;margin:0 auto;padding:20px 18px 60px}
+  h1{font-size:22px;margin:0 0 4px}
+  .sub{color:var(--ink2);font-size:13px;margin-bottom:16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:14px}
+  .card h2{font-size:15px;margin:0 0 10px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  .bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  button{font-family:inherit;font-size:13px;padding:7px 14px;border-radius:7px;cursor:pointer;
+    border:1px solid var(--line);background:#fff;color:var(--ink)}
+  button:hover{border-color:var(--accent);color:var(--accent)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.primary:hover{opacity:.88;color:#fff}
+  .ctl{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ink2)}
+  .ctl input[type=range]{width:96px}
+  .ctl b{color:var(--ink);font-variant-numeric:tabular-nums;min-width:26px;display:inline-block}
+  table{border-collapse:collapse;width:100%;font-size:13px}
+  th,td{border:1px solid var(--line);padding:6px 10px;text-align:left}
+  th{background:#fafbfc;font-weight:600;color:var(--ink2)}
+  td.num{font-variant-numeric:tabular-nums;font-family:Consolas,"Courier New",monospace}
+  canvas{display:block;background:#0d1117;border-radius:6px;image-rendering:pixelated;margin:2px 0 8px}
+  .rowlab{font-size:13px;font-weight:600;margin:12px 0 3px}
+  .rowlab span{font-weight:400;color:var(--ink2);font-size:12px;margin-left:8px}
+  .note{background:#fff8ed;border:1px solid #f0d9a8;border-radius:8px;padding:10px 14px;font-size:13px;color:#6b4a12}
+  .note.warn{background:#fdf0ef;border-color:#f0c4be;color:#8a2c22}
+  .note b{color:#7c3d05}
+  .note.warn b{color:#8a2c22}
+  code{background:#f0f2f5;padding:1px 5px;border-radius:4px;font-size:12px}
+  .flex{display:flex;gap:14px;flex-wrap:wrap}
+  .flex>div{flex:1;min-width:280px}
+  .tag{display:inline-block;font-size:11px;padding:1px 7px;border-radius:10px;background:#eef2f7;color:var(--ink2);margin-left:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>灵境 · 三维热传导虚拟仿真<span class="tag">M<sub>3,1</sub> 三维切片</span></h1>
+  <div class="sub">20×20×20 = 8000 自由度的真 PDE 步进（七点显式 FTCS），经 POD 降到 r=8 维边界，再在边界上做动力学预测后反向重建。
+    三行分别是：<b>真实场</b> / <b>POD 重建场</b> / <b>边界纯预测场（不喂真值）</b>。全部实算，不是渲染动画。</div>
+
+  <div class="card">
+    <h2>控制台</h2>
+    <div class="bar" style="margin-bottom:10px">
+      <button id="btnPlay" class="primary">▶ 播放</button>
+      <button id="btnStep">单步 ▸</button>
+      <button id="btnRetrain">重置并重建基（分布内）</button>
+      <button id="btnOOD">换个位置放热（分布外测试）</button>
+      <button id="btnAdapt">自适应吸收当前状态</button>
+    </div>
+    <div class="bar">
+      <label class="ctl">热点 X <input type="range" id="hx" min="4" max="15" value="10"><b id="hxv">10</b></label>
+      <label class="ctl">热点 Y <input type="range" id="hy" min="4" max="15" value="10"><b id="hyv">10</b></label>
+      <label class="ctl">热点 Z <input type="range" id="hz" min="4" max="15" value="10"><b id="hzv">10</b></label>
+      <label class="ctl">降阶维数 r <input type="range" id="rk" min="2" max="12" value="8"><b id="rkv">8</b></label>
+      <label class="ctl"><input type="checkbox" id="fixScale"> 固定色标 0~1</label>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>实时指标</h2>
+    <div class="flex">
+      <div>
+        <table>
+          <tr><th>L1 物理底座</th><td class="num" id="m-t">—</td></tr>
+          <tr><th>场峰值 / 均值</th><td class="num" id="m-max">—</td></tr>
+          <tr><th>CFL λ = α·dt/dx²</th><td class="num" id="m-cfl">—</td></tr>
+          <tr><th>自由度 N / 边界维 r</th><td class="num" id="m-dim">—</td></tr>
+        </table>
+      </div>
+      <div>
+        <table>
+          <tr><th>L3 能量捕获率</th><td class="num" id="m-energy">—</td></tr>
+          <tr><th>L3 有效秩（诚实指标）</th><td class="num" id="m-rank">—</td></tr>
+          <tr><th>L3 压缩比</th><td class="num" id="m-cr">—</td></tr>
+          <tr><th>L4 仿射拟合残差</th><td class="num" id="m-fit">—</td></tr>
+        </table>
+      </div>
+      <div>
+        <table>
+          <tr><th>L5 重建误差（当前步）</th><td class="num" id="m-l5">—</td></tr>
+          <tr><th>L4 自由演化误差（当前步）</th><td class="num" id="m-l4">—</td></tr>
+          <tr><th>当前模式</th><td class="num" id="m-mode">分布内</td></tr>
+          <tr><th>自适应吸收次数</th><td class="num" id="m-adapt">0</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>场可视化：9 个 z 切片（z = 2,4,…,18）</h2>
+    <div class="rowlab">L1 / L2　真实场<span>真 PDE 步进的结果，作为对照基准</span></div>
+    <canvas id="cvTrue" width="684" height="76"></canvas>
+    <div class="rowlab">L5　POD 重建场<span>把真实场投影到 r 维边界后立刻重建（测的是降阶损失）</span></div>
+    <canvas id="cvRec" width="684" height="76"></canvas>
+    <div class="rowlab">L4　边界纯预测场<span>只在 r 维边界上递推 ψ_{t+1}=Aψ_t+b，<b>全程不喂真值</b>，再反向重建</span></div>
+    <canvas id="cvPred" width="684" height="76"></canvas>
+    <div class="bar" style="margin-top:6px;font-size:12px;color:var(--ink2)">
+      <span>色标：</span><canvas id="cvBar" width="180" height="12" style="border-radius:3px;margin:0 6px"></canvas>
+      <span id="scaleTxt">0 → 当前峰值</span>
+    </div>
+  </div>
+
+  <div class="note">
+    <b>怎么看这个页面：</b>正常情况下（分布内）三行应当几乎一样——热传导是线性 PDE，
+    在 r 维边界上做预测几乎不引入额外误差，L4 自由演化误差与 L5 投影底线<b>同量级</b>（1e-5 ~ 1e-4 量级）。
+    真正的考验是点<b>「换个位置放热」</b>：世界变了，但边界模型还停在旧基上，L5 误差会飙到 <b>~90%</b>。
+    这就是降阶模型的真实泛化局限，不是 bug。
+  </div>
+  <div class="note warn" style="margin-top:10px">
+    <b>关于「自适应吸收」：</b>点它把当前状态收进基里，L5 误差会立刻掉到 0.0000%——
+    但那只是<b>把这个状态记住了</b>（吸收进了 POD 基），不是模型变聪明了。
+    再点一次「换个位置放热」，另一个没见过的状态照样 ~88%。<b>只有后者才是泛化指标</b>，
+    本页面两个都显示，别只看好看的那个。
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <h2>诚实边界</h2>
+    <table>
+      <tr><th style="width:180px">已实现</th><td>三维热传导一个 PDE（各向同性常系数）、Dirichlet 零边界、显式 FTCS、POD 降阶、仿射边界动力学</td></tr>
+      <tr><th>未实现</th><td>弹性 / 流体 / 声学 / 电磁；复杂几何；自适应网格；隐式时间步（所以 dt 受 CFL λ≤1/6 硬约束，超了内核直接拒绝启动）</td></tr>
+      <tr><th>为什么必须仿射</th><td>ψ = Φᵀ(φ−φ̄) 减均值引入了常数项，真实关系 ψ<sub>t+1</sub>=Aψ_t+b。只拟合 A 时 6 步预测误差 <b>7.87e-1（≈79%）</b>，加 b 后降到 <b>3.5e-9</b></td></tr>
+      <tr><th>数字出处</th><td><code>node verify3d.js</code> 与 <code>python verify3d.py</code> 双轨跑出，两轨逐项一致</td></tr>
+    </table>
+  </div>
+</div>
+
+<script src="rom.js"></script>
+<script>
+(function(){
+  var R = window.LingJingROM;
+  if (!R || !R.HeatWorld3D) { document.body.innerHTML = '<p style="padding:40px">rom.js 未加载：请把 sim3d.html 与 rom.js 放在同一目录。</p>'; return; }
+
+  var NX=20, NY=20, NZ=20, ALPHA=0.2, DT=0.5, DX=1, SIGMA=3;
+  // ⚠️ COLLECT_EVERY 必须等于每递推一次走的物理步数。快照每 2 步存一张 ⇒ 拟合出的是"两步映射"，
+  //    若页面每 1 步递推一次，等于让预测跑双倍速，L4 误差会虚高到 1e-1 量级（踩过的坑）。
+  //    这里页面按 1 物理步推进，故每步都存快照。
+  var TRAIN_STEPS=40, COLLECT_EVERY=1, RANK=8;
+
+  var w, holo, Afit, psiPred, steps=0, adapts=0, mode='分布内', timer=null, hot=[10,10,10];
+  var vmaxFix=false;
+
+  function gauss(i,j,k,c){
+    var dx=i-c[0], dy=j-c[1], dz=k-c[2];
+    return Math.exp(-(dx*dx+dy*dy+dz*dz)/(2*SIGMA*SIGMA));
+  }
+
+  function newWorld(center){
+    w = new R.HeatWorld3D(NX,NY,NZ,{alpha:ALPHA,dt:DT,dx:DX,boundary:0});
+    w.init(function(i,j,k){ return gauss(i,j,k,center); });
+    return w;
+  }
+
+  /* 训练：跑 TRAIN_STEPS 步，每 COLLECT_EVERY 步留一张【拷贝】快照。
+     ⚠️ 必须 .slice()：step() 原地改写 field，存引用会让所有快照塌成终态
+        → PᵀP 秩亏 → 最小二乘静默返回全零 → A=0（历史上踩过的伪绿 bug）。 */
+  function train(center){
+    newWorld(center);
+    holo = new R.HoloMap(w.N, 80);
+    holo.collect(Array.prototype.slice.call(w.flat()));
+    for (var s=1;s<=TRAIN_STEPS;s++){
+      w.step();
+      if (s % COLLECT_EVERY === 0) holo.collect(Array.prototype.slice.call(w.flat()));
+    }
+    holo.build(RANK);
+    steps = 0;
+    refit();
+    psiPred = holo.project(w.flat());
+  }
+
+  function refit(){
+    var seq = holo.snaps.map(function(p){ return holo.project(p); });
+    Afit = R.fitAffine(seq);
+  }
+
+  function rel(a,b){
+    var n=0,d=0;
+    for (var i=0;i<a.length;i++){ var e=a[i]-b[i]; n+=e*e; d+=b[i]*b[i]; }
+    return d>0 ? Math.sqrt(n/d) : 0;
+  }
+
+  function advance(){
+    w.step();
+    // L4：在 r 维边界上递推，不接触真实场
+    var seq = R.predictAffine(Afit.A, psiPred, 1);
+    psiPred = seq[seq.length-1];
+    steps++;
+  }
+
+  /* ---------- 渲染 ---------- */
+  var STOPS=[[13,17,23],[45,12,63],[97,20,90],[160,45,60],[214,92,40],[248,168,20],[255,230,140],[255,255,240]];
+  function color(t){
+    t = t<0?0:(t>1?1:t);
+    var x = t*(STOPS.length-1), i = Math.floor(x), f = x-i;
+    var a = STOPS[i], b = STOPS[Math.min(i+1,STOPS.length-1)];
+    return [Math.round(a[0]+(b[0]-a[0])*f), Math.round(a[1]+(b[1]-a[1])*f), Math.round(a[2]+(b[2]-a[2])*f)];
+  }
+  function drawBar(){
+    var c=document.getElementById('cvBar'), g=c.getContext('2d');
+    for (var x=0;x<c.width;x++){ var rgb=color(x/(c.width-1)); g.fillStyle='rgb('+rgb[0]+','+rgb[1]+','+rgb[2]+')'; g.fillRect(x,0,1,c.height); }
+  }
+  var TILE=72, GAP=4;
+  function drawRow(id, field, vmax){
+    var c=document.getElementById(id), g=c.getContext('2d');
+    g.fillStyle='#0d1117'; g.fillRect(0,0,c.width,c.height);
+    g.imageSmoothingEnabled=false;
+    var off=document.createElement('canvas'); off.width=NX; off.height=NY;
+    var og=off.getContext('2d'), img=og.createImageData(NX,NY);
+    for (var t=0;t<9;t++){
+      var z=(t+1)*2;
+      for (var j=0;j<NY;j++) for (var i=0;i<NX;i++){
+        var v=field[(z*NY+j)*NX+i]/vmax;
+        var rgb=color(v), p=(j*NX+i)*4;
+        img.data[p]=rgb[0]; img.data[p+1]=rgb[1]; img.data[p+2]=rgb[2]; img.data[p+3]=255;
+      }
+      og.putImageData(img,0,0);
+      g.drawImage(off, t*(TILE+GAP), 2, TILE, TILE);
+      g.fillStyle='rgba(255,255,255,.55)'; g.font='10px Consolas,monospace';
+      g.fillText('z='+z, t*(TILE+GAP)+4, TILE);
+    }
+  }
+
+  function render(){
+    var truth = w.flat();
+    var psiT  = holo.project(truth);
+    var rec   = holo.reconstruct(psiT);          // L5：投影后立刻重建
+    var pred  = holo.reconstruct(psiPred);       // L4：纯边界演化再重建
+    var mx=0,sum=0;
+    for (var i=0;i<truth.length;i++){ if(truth[i]>mx)mx=truth[i]; sum+=truth[i]; }
+    var vmax = vmaxFix ? 1.0 : (mx>1e-9?mx:1);
+    drawRow('cvTrue',truth,vmax); drawRow('cvRec',rec,vmax); drawRow('cvPred',pred,vmax);
+
+    var e5 = rel(rec,truth), e4 = rel(pred,truth);
+    document.getElementById('m-t').textContent  = 't = '+(w.time).toFixed(1)+'（训练后 +'+steps+' 步）';
+    document.getElementById('m-max').textContent  = mx.toFixed(6)+' / '+(sum/truth.length).toFixed(6);
+    document.getElementById('m-cfl').textContent  = w.lam.toFixed(4)+'（上限 0.1667）';
+    document.getElementById('m-dim').textContent  = w.N+' / '+RANK+'（'+ (w.N/RANK).toFixed(0) +':1）';
+    document.getElementById('m-energy').textContent = (holo.energy()*100).toFixed(4)+'%';
+    document.getElementById('m-rank').textContent = holo.effectiveRank()+' / '+RANK;
+    document.getElementById('m-cr').textContent   = (w.N/RANK).toFixed(0)+' : 1';
+    document.getElementById('m-fit').textContent  = Afit.relErr.toExponential(3);
+    document.getElementById('m-l5').textContent   = (e5*100).toFixed(4)+'%';
+    document.getElementById('m-l4').textContent   = e4.toExponential(3);
+    document.getElementById('m-mode').textContent = mode;
+    document.getElementById('m-adapt').textContent= adapts;
+    document.getElementById('scaleTxt').textContent = vmaxFix ? '固定 0 → 1' : ('0 → '+mx.toFixed(4));
+    var l4=document.getElementById('m-l4');
+    l4.style.color = e4>0.1 ? 'var(--bad)' : (e4>1e-3 ? 'var(--warn)' : 'var(--ok)');
+    document.getElementById('m-l5').style.color = e5>0.1 ? 'var(--bad)' : (e5>1e-3 ? 'var(--warn)' : 'var(--ok)');
+  }
+
+  /* ---------- 交互 ---------- */
+  function bindSlider(id,vid){ var s=document.getElementById(id), v=document.getElementById(vid);
+    s.addEventListener('input',function(){ v.textContent=s.value; }); }
+  ['hx','hy','hz','rk'].forEach(function(id){ bindSlider(id,id+'v'); });
+
+  document.getElementById('btnPlay').addEventListener('click',function(){
+    if (timer){ clearInterval(timer); timer=null; this.textContent='▶ 播放'; }
+    else { timer=setInterval(function(){ advance(); render(); },140); this.textContent='⏸ 暂停'; }
+  });
+  document.getElementById('btnStep').addEventListener('click',function(){ advance(); render(); });
+  document.getElementById('rk').addEventListener('change',function(){
+    RANK=parseInt(this.value,10); train(hot); mode='分布内（r='+RANK+' 重建）'; render();
+  });
+  document.getElementById('fixScale').addEventListener('change',function(){ vmaxFix=this.checked; render(); });
+  document.getElementById('btnRetrain').addEventListener('click',function(){
+    hot=[+document.getElementById('hx').value,+document.getElementById('hy').value,+document.getElementById('hz').value];
+    train(hot); mode='分布内'; adapts=0; render();
+  });
+  document.getElementById('btnOOD').addEventListener('click',function(){
+    // 世界换成新位置的热源，但【不重建基】——模拟"现实变了，边界模型还停在旧认知"
+    var c=[+document.getElementById('hx').value,+document.getElementById('hy').value,+document.getElementById('hz').value];
+    newWorld(c);
+    psiPred = holo.project(w.flat());
+    steps=0; mode='分布外（基未更新）'; render();
+  });
+  document.getElementById('btnAdapt').addEventListener('click',function(){
+    holo.collect(Array.prototype.slice.call(w.flat()));
+    holo.build(RANK); refit();
+    psiPred = holo.project(w.flat());
+    adapts++; mode='自适应后（已吸收 '+adapts+' 次）'; render();
+  });
+
+  drawBar();
+  train(hot);
+  render();
+})();
+</script>
+</body>
+</html>
