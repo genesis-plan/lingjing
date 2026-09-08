@@ -161,18 +161,57 @@
       this.time = 0;
     }
     idx(i, j, k) { return (k * this.ny + j) * this.nx + i; }
-    /** 初始场 f(i,j,k) -> value；两轨统一在 init 施加边界 */
+
+    /* ================= 世界坐标系 =================
+       唯一原点 (0,0,0) 在网格【正中心】，X/Y/Z 各有正负半轴。
+       网格取奇数时原点落在真实格点上（如 n=21 → 索引 10 的坐标恰为 0，正负各 10 格）；
+       取偶数时原点落在两个格点中间，world().originOnGridPoint 会如实报 false。
+       物理坐标 x = (i - ox)·dx ，反过来 i = round(x/dx + ox)。 */
+    get ox() { return (this.nx - 1) / 2; }
+    get oy() { return (this.ny - 1) / 2; }
+    get oz() { return (this.nz - 1) / 2; }
+    xOf(i) { return (i - this.ox) * this.dx; }
+    yOf(j) { return (j - this.oy) * this.dx; }
+    zOf(k) { return (k - this.oz) * this.dx; }
+    iOf(x) { return Math.round(x / this.dx + this.ox); }
+    jOf(y) { return Math.round(y / this.dx + this.oy); }
+    kOf(z) { return Math.round(z / this.dx + this.oz); }
+    /** 世界坐标 -> 展平下标；越界返回 -1 */
+    indexAt(x, y, z) {
+      const i = this.iOf(x), j = this.jOf(y), k = this.kOf(z);
+      if (i < 0 || j < 0 || k < 0 || i >= this.nx || j >= this.ny || k >= this.nz) return -1;
+      return this.idx(i, j, k);
+    }
+    /** 展平下标 -> 世界坐标 {x,y,z} */
+    coordsOf(p) {
+      const i = p % this.nx, j = Math.floor(p / this.nx) % this.ny, k = Math.floor(p / (this.nx * this.ny));
+      return { x: this.xOf(i), y: this.yOf(j), z: this.zOf(k) };
+    }
+    /** 世界的几何描述（UI / 验真用） */
+    world() {
+      return {
+        xmin: this.xOf(0), xmax: this.xOf(this.nx - 1),
+        ymin: this.yOf(0), ymax: this.yOf(this.ny - 1),
+        zmin: this.zOf(0), zmax: this.zOf(this.nz - 1),
+        dx: this.dx,
+        originIndex: [this.ox, this.oy, this.oz],
+        originOnGridPoint: Number.isInteger(this.ox) && Number.isInteger(this.oy) && Number.isInteger(this.oz),
+      };
+    }
+
+    /** 初始场 f(x,y,z) -> value，坐标为【物理世界坐标，带正负】，不是网格索引 */
     init(f) {
       const { nx, ny, nz } = this;
       for (let k = 0; k < nz; k++) for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
-        this.field[this.idx(i, j, k)] = f(i, j, k);
+        this.field[this.idx(i, j, k)] = f(this.xOf(i), this.yOf(j), this.zOf(k));
       }
       this._applyBoundary();
       return this.field;
     }
-    /** 源/汇（正值加热，负值冷却） */
-    setSource(i, j, k, v) {
-      if (i >= 0 && i < this.nx && j >= 0 && j < this.ny && k >= 0 && k < this.nz) this.sources[this.idx(i, j, k)] = v;
+    /** 源/汇（正值加热，负值冷却），坐标为物理世界坐标 */
+    setSource(x, y, z, v) {
+      const p = this.indexAt(x, y, z);
+      if (p >= 0) this.sources[p] = v;
     }
     clearSources() { this.sources.fill(0); }
     _applyBoundary() {
@@ -213,6 +252,8 @@
     }
     /** 取 z=k 的切片（返回 nx*ny 的 Float64Array，行序 j） */
     sliceZ(k) { return this.field.subarray(k * this.ny * this.nx, (k + 1) * this.ny * this.nx); }
+    /** 按【物理坐标】取 z 平面切片（取最近的一层） */
+    sliceAtZ(z) { return this.sliceZ(this.kOf(z)); }
     flat() { return this.field; }
   }
 
@@ -263,10 +304,20 @@
       }
       const eig = jacobiEigen(C, T);
       const rr = Math.min(r || 4, T - 1);
+      /* ★ 数值秩护栏（两道）
+         谱会一直衰减到浮点噪声层。那里的"模态"不是物理方向，而是数值垃圾：
+         彼此不正交（实测 Gram 非对角元可达 0.876——几乎平行），加进基里不但不降误差，
+         反而把重建误差从 0.000007% 恶化到 0.00274%。
+         第一道 · λ 噪声地板：λ_m ≤ λ_max·1e-12 直接不取。
+                 依据：C 由 N~1e4 项累加而成，相对误差 ~√N·eps ≈ 2e-14，取 100 倍安全余量。
+         第二道 · 修正 Gram-Schmidt 重正交：保证 ΦᵀΦ = I，这是 project/reconstruct
+                 作为"正交投影"的前提；正交后残余过小者（与已有模态线性相关）丢弃。 */
+      const lamMax = eig.values.length ? Math.max(eig.values[0], 0) : 0;
+      const noiseFloor = lamMax * 1e-12;
       const modes = [], lam = [];
       for (let m = 0; m < rr; m++) {
         const v = eig.vectors[m], lv = Math.max(eig.values[m], 0);
-        if (lv <= 1e-14) break;
+        if (lv <= noiseFloor) break;                // 第一道：噪声地板之下不取
         const mode = new Float64Array(N);
         for (let a = 0; a < T; a++) {
           const coef = v[a];
@@ -277,6 +328,18 @@
         nrm = Math.sqrt(nrm);
         if (nrm < 1e-14) continue;
         for (let k = 0; k < N; k++) mode[k] /= nrm;
+        // 第二道：对已接受的模态做两轮 MGS（两轮足以压到机器精度）
+        for (let pass = 0; pass < 2; pass++) {
+          for (let q = 0; q < modes.length; q++) {
+            const qv = modes[q];
+            let d = 0; for (let k = 0; k < N; k++) d += qv[k] * mode[k];
+            for (let k = 0; k < N; k++) mode[k] -= d * qv[k];
+          }
+        }
+        let n2 = 0; for (let k = 0; k < N; k++) n2 += mode[k] * mode[k];
+        if (Math.sqrt(n2) < 1e-3) continue;         // 与已有模态近乎线性相关 → 丢弃
+        const nn = Math.sqrt(n2);
+        for (let k = 0; k < N; k++) mode[k] /= nn;
         modes.push(mode); lam.push(lv);
       }
       this.modes = modes; this.lambda = lam; this.r = modes.length;

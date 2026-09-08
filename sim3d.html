@@ -60,11 +60,35 @@
       <button id="btnAdapt">自适应吸收当前状态</button>
     </div>
     <div class="bar">
-      <label class="ctl">热点 X <input type="range" id="hx" min="4" max="15" value="10"><b id="hxv">10</b></label>
-      <label class="ctl">热点 Y <input type="range" id="hy" min="4" max="15" value="10"><b id="hyv">10</b></label>
-      <label class="ctl">热点 Z <input type="range" id="hz" min="4" max="15" value="10"><b id="hzv">10</b></label>
+      <label class="ctl">热点 X（世界坐标）<input type="range" id="hx" min="-8" max="8" value="0"><b id="hxv">0</b></label>
+      <label class="ctl">热点 Y（世界坐标）<input type="range" id="hy" min="-8" max="8" value="0"><b id="hyv">0</b></label>
+      <label class="ctl">热点 Z（世界坐标）<input type="range" id="hz" min="-8" max="8" value="0"><b id="hzv">0</b></label>
       <label class="ctl">降阶维数 r <input type="range" id="rk" min="2" max="12" value="8"><b id="rkv">8</b></label>
       <label class="ctl"><input type="checkbox" id="fixScale"> 固定色标 0~1</label>
+    </div>
+    <div class="bar" style="margin-top:10px;align-items:flex-start">
+      <svg width="150" height="120" viewBox="0 0 150 120" aria-label="世界坐标系">
+        <line x1="75" y1="60" x2="140" y2="60" stroke="#2f6feb" stroke-width="2"/>
+        <line x1="75" y1="60" x2="10"  y2="60" stroke="#2f6feb" stroke-width="2" stroke-dasharray="4 3"/>
+        <line x1="75" y1="60" x2="75"  y2="10"  stroke="#1e7e46" stroke-width="2"/>
+        <line x1="75" y1="60" x2="75"  y2="110" stroke="#1e7e46" stroke-width="2" stroke-dasharray="4 3"/>
+        <line x1="75" y1="60" x2="128" y2="102" stroke="#b45309" stroke-width="2"/>
+        <line x1="75" y1="60" x2="22"  y2="18"  stroke="#b45309" stroke-width="2" stroke-dasharray="4 3"/>
+        <circle cx="75" cy="60" r="4" fill="#1f2328"/>
+        <text x="132" y="55" font-size="11" fill="#2f6feb">+X</text>
+        <text x="6"   y="55" font-size="11" fill="#2f6feb">−X</text>
+        <text x="78"  y="16" font-size="11" fill="#1e7e46">+Y</text>
+        <text x="78"  y="116" font-size="11" fill="#1e7e46">−Y</text>
+        <text x="126" y="116" font-size="11" fill="#b45309">+Z</text>
+        <text x="6"   y="24"  font-size="11" fill="#b45309">−Z</text>
+        <text x="80"  y="72"  font-size="10" fill="#5b6570">原点 0</text>
+      </svg>
+      <div style="font-size:12px;color:var(--ink2);line-height:1.9">
+        <b style="color:var(--ink)">世界坐标系</b>：唯一原点 <code>(0,0,0)</code>，位于网格正中心<br>
+        范围 <code>x, y, z ∈ [-10, +10]</code>，格距 <code>dx = 1</code>（21³ = 9261 自由度）<br>
+        实线＝正半轴，虚线＝负半轴；每格切片上的白色十字丝即 <code>x=0, y=0</code> 的位置<br>
+        热点、切片、边界全部按<b>物理坐标</b>给出，不再是数组下标
+      </div>
     </div>
   </div>
 
@@ -99,7 +123,7 @@
   </div>
 
   <div class="card">
-    <h2>场可视化：9 个 z 切片（z = 2,4,…,18）</h2>
+    <h2>场可视化：9 个 z 切片（z = −8 … +8，正中间是原点平面 z = 0）</h2>
     <div class="rowlab">L1 / L2　真实场<span>真 PDE 步进的结果，作为对照基准</span></div>
     <canvas id="cvTrue" width="684" height="76"></canvas>
     <div class="rowlab">L5　POD 重建场<span>把真实场投影到 r 维边界后立刻重建（测的是降阶损失）</span></div>
@@ -142,23 +166,27 @@
   var R = window.LingJingROM;
   if (!R || !R.HeatWorld3D) { document.body.innerHTML = '<p style="padding:40px">rom.js 未加载：请把 sim3d.html 与 rom.js 放在同一目录。</p>'; return; }
 
-  var NX=20, NY=20, NZ=20, ALPHA=0.2, DT=0.5, DX=1, SIGMA=3;
+  // 奇数网格：原点 (0,0,0) 落在真实格点上，XYZ 各有 ±10 的正负半轴
+  var NX=21, NY=21, NZ=21, ALPHA=0.2, DT=0.5, DX=1, SIGMA=3;
+  // 9 个切片取对称的物理坐标，正中间那张就是【原点平面 z=0】
+  var ZS=[-8,-6,-4,-2,0,2,4,6,8];
   // ⚠️ COLLECT_EVERY 必须等于每递推一次走的物理步数。快照每 2 步存一张 ⇒ 拟合出的是"两步映射"，
   //    若页面每 1 步递推一次，等于让预测跑双倍速，L4 误差会虚高到 1e-1 量级（踩过的坑）。
   //    这里页面按 1 物理步推进，故每步都存快照。
   var TRAIN_STEPS=40, COLLECT_EVERY=1, RANK=8;
 
-  var w, holo, Afit, psiPred, steps=0, adapts=0, mode='分布内', timer=null, hot=[10,10,10];
+  var w, holo, Afit, psiPred, steps=0, adapts=0, mode='分布内', timer=null, hot=[0,0,0];
   var vmaxFix=false;
 
-  function gauss(i,j,k,c){
-    var dx=i-c[0], dy=j-c[1], dz=k-c[2];
+  function gauss(x,y,z,c){
+    var dx=x-c[0], dy=y-c[1], dz=z-c[2];
     return Math.exp(-(dx*dx+dy*dy+dz*dz)/(2*SIGMA*SIGMA));
   }
 
   function newWorld(center){
+    // ⚠️ init 接收的是【物理世界坐标】(x,y,z)，带正负，不是网格索引
     w = new R.HeatWorld3D(NX,NY,NZ,{alpha:ALPHA,dt:DT,dx:DX,boundary:0});
-    w.init(function(i,j,k){ return gauss(i,j,k,center); });
+    w.init(function(x,y,z){ return gauss(x,y,z,center); });
     return w;
   }
 
@@ -211,23 +239,33 @@
     for (var x=0;x<c.width;x++){ var rgb=color(x/(c.width-1)); g.fillStyle='rgb('+rgb[0]+','+rgb[1]+','+rgb[2]+')'; g.fillRect(x,0,1,c.height); }
   }
   var TILE=72, GAP=4;
+  /** 网格格点 -> 画布像素（取格心） */
+  function iOfPix(i){ return Math.round((i+0.5)*TILE/NX); }
   function drawRow(id, field, vmax){
     var c=document.getElementById(id), g=c.getContext('2d');
     g.fillStyle='#0d1117'; g.fillRect(0,0,c.width,c.height);
     g.imageSmoothingEnabled=false;
     var off=document.createElement('canvas'); off.width=NX; off.height=NY;
     var og=off.getContext('2d'), img=og.createImageData(NX,NY);
-    for (var t=0;t<9;t++){
-      var z=(t+1)*2;
+    for (var t=0;t<ZS.length;t++){
+      var zPhys=ZS[t], z=w.kOf(zPhys);            // 物理坐标 → 最近的一层
       for (var j=0;j<NY;j++) for (var i=0;i<NX;i++){
         var v=field[(z*NY+j)*NX+i]/vmax;
         var rgb=color(v), p=(j*NX+i)*4;
         img.data[p]=rgb[0]; img.data[p+1]=rgb[1]; img.data[p+2]=rgb[2]; img.data[p+3]=255;
       }
       og.putImageData(img,0,0);
-      g.drawImage(off, t*(TILE+GAP), 2, TILE, TILE);
-      g.fillStyle='rgba(255,255,255,.55)'; g.font='10px Consolas,monospace';
-      g.fillText('z='+z, t*(TILE+GAP)+4, TILE);
+      var x0=t*(TILE+GAP);
+      g.drawImage(off, x0, 2, TILE, TILE);
+      // 原点十字丝：标出 x=0, y=0 在这一层的哪个像素
+      var cxi=iOfPix(w.iOf(0)), cyi=iOfPix(w.jOf(0));
+      g.strokeStyle='rgba(255,255,255,.45)'; g.lineWidth=1;
+      g.beginPath();
+      g.moveTo(x0+cxi+0.5, 2); g.lineTo(x0+cxi+0.5, 2+TILE);
+      g.moveTo(x0, 2+cyi+0.5); g.lineTo(x0+TILE, 2+cyi+0.5);
+      g.stroke();
+      g.fillStyle='rgba(255,255,255,.75)'; g.font='10px Consolas,monospace';
+      g.fillText((zPhys>0?'z=+':(zPhys<0?'z=':'z= '))+zPhys, x0+4, TILE);
     }
   }
 
@@ -245,10 +283,11 @@
     document.getElementById('m-t').textContent  = 't = '+(w.time).toFixed(1)+'（训练后 +'+steps+' 步）';
     document.getElementById('m-max').textContent  = mx.toFixed(6)+' / '+(sum/truth.length).toFixed(6);
     document.getElementById('m-cfl').textContent  = w.lam.toFixed(4)+'（上限 0.1667）';
-    document.getElementById('m-dim').textContent  = w.N+' / '+RANK+'（'+ (w.N/RANK).toFixed(0) +':1）';
+    document.getElementById('m-dim').textContent  = w.N+' / '+holo.r+'（'+(w.N/holo.r).toFixed(0)+':1）'
+      + (holo.r < RANK ? '  ← r='+RANK+' 被噪声地板截到 '+holo.r : '');
     document.getElementById('m-energy').textContent = (holo.energy()*100).toFixed(4)+'%';
-    document.getElementById('m-rank').textContent = holo.effectiveRank()+' / '+RANK;
-    document.getElementById('m-cr').textContent   = (w.N/RANK).toFixed(0)+' : 1';
+    document.getElementById('m-rank').textContent = holo.effectiveRank()+' / '+holo.r;
+    document.getElementById('m-cr').textContent   = (w.N/holo.r).toFixed(0)+' : 1';
     document.getElementById('m-fit').textContent  = Afit.relErr.toExponential(3);
     document.getElementById('m-l5').textContent   = (e5*100).toFixed(4)+'%';
     document.getElementById('m-l4').textContent   = e4.toExponential(3);

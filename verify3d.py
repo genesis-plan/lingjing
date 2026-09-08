@@ -21,19 +21,24 @@ from lingjing_rom import (HeatWorld3D, HoloMap, fit_linear, fit_affine,
                           predict, predict_affine)
 
 # ---- 场景参数（两轨必须一致）----
-N = 20                 # 每边格点数 → N³ = 8000 自由度
+# N 取【奇数】：原点 (0,0,0) 才能落在真实格点上，正负各 (N-1)/2 格
+N = 21                 # 每边格点数 → N³ = 9261 自由度
 SIGMA = 3.0
-CENTER = (N - 1) / 2
 TRAIN_STEPS = 40       # 训练段：t=0..40
 TEST_STEPS = 20        # 测试段：继续步进到 t=60（基未见过）
 SNAP_EVERY = 2
 R = 8
 H = 6                  # L4 多步预测步数
 
+# ⚠️ 热点位置一律用【物理世界坐标】（带正负），不再是网格索引
+ORIGIN = (0.0, 0.0, 0.0)          # 世界原点
+OOD_A = (-6.0, -6.0, -6.0)        # 分布外状态 1（负象限）
+OOD_B = (5.0, 5.0, -6.0)          # 分布外状态 2（x,y 正 z 负）
+
 
 def hot_spot(cx: float, cy: float, cz: float):
-    def f(i, j, k):
-        d = (i - cx) ** 2 + (j - cy) ** 2 + (k - cz) ** 2
+    def f(x, y, z):                 # x,y,z 为物理世界坐标，带正负
+        d = (x - cx) ** 2 + (y - cy) ** 2 + (z - cz) ** 2
         return float(np.exp(-d / (2 * SIGMA * SIGMA)))
     return f
 
@@ -52,8 +57,50 @@ print("=== 灵境 3D 验真 · Python 轨 ===")
 
 # ==================== L1+L2：三维热传导演化 ====================
 w = HeatWorld3D(nx=N, ny=N, nz=N, **OPTS)
-w.init(hot_spot(CENTER, CENTER, CENTER))
+w.init(hot_spot(*ORIGIN))
 print(f"网格 {N}×{N}×{N} = {w.N} 自由度 | λ=α·dt/dx²={w.lam:.6f} (3D CFL 上限 0.166667)")
+
+# ==================== 坐标系自检：唯一原点 + XYZ 正负半轴 ====================
+# 世界不是数组。这里必须能回答：原点在哪里？正负方向有没有？往返映射对不对？
+_pass, _fail = 0, 0
+
+
+def ck(name: str, cond: bool) -> None:
+    global _pass, _fail
+    if cond:
+        _pass += 1
+    else:
+        _fail += 1
+        print(f"  ❌ {name}")
+
+
+wd = w.world()
+print(f"坐标系：原点 (0,0,0) 位于网格 {wd['origin_index']}，"
+      f"范围 x∈[{wd['xmin']}, {wd['xmax']}] y∈[{wd['ymin']}, {wd['ymax']}] "
+      f"z∈[{wd['zmin']}, {wd['zmax']}]，dx={wd['dx']}")
+ck("原点落在真实格点上（N 为奇数）", bool(wd["origin_on_grid_point"]))
+ck("原点格点坐标为 0", w.x_of(w.i_of(0)) == 0 and w.y_of(w.j_of(0)) == 0 and w.z_of(w.k_of(0)) == 0)
+ck("X 半轴对称", abs(wd["xmin"] + wd["xmax"]) < 1e-12)
+ck("Y 半轴对称", abs(wd["ymin"] + wd["ymax"]) < 1e-12)
+ck("Z 半轴对称", abs(wd["zmin"] + wd["zmax"]) < 1e-12)
+ck("X 有正负两侧", wd["xmin"] < 0 and wd["xmax"] > 0)
+ck("Y 有正负两侧", wd["ymin"] < 0 and wd["ymax"] > 0)
+ck("Z 有正负两侧", wd["zmin"] < 0 and wd["zmax"] > 0)
+
+_oct = True
+for sx in (-1, 1):
+    for sy in (-1, 1):
+        for sz in (-1, 1):
+            cx, cy, cz = w.coords_of(w.index_at(sx * 5, sy * 5, sz * 5))
+            if (np.sign(cx), np.sign(cy), np.sign(cz)) != (sx, sy, sz):
+                _oct = False
+ck("八个象限坐标符号正确", _oct)
+
+_rt = all(w.index_at(w.x_of(i), w.y_of(j), w.z_of(k)) == w.idx(i, j, k)
+          for k in range(N) for j in range(N) for i in range(N))
+ck(f"格点↔物理坐标 往返逐点一致（{N}³ 全查）", _rt)
+ck("越界查询返回 -1", w.index_at(1e3, 0, 0) == -1)
+print(f"  坐标系自检：{_pass} 通过 / {_fail} 失败")
 
 holo = HoloMap(N=w.N, max_snap=200)
 for t in range(TRAIN_STEPS + 1):
@@ -88,7 +135,7 @@ print(f"  L5 重建误差 · 分布内(留出) = {err_in * 100:.4f}%")
 
 # ==================== L5：分布外（热点挪到别处） ====================
 w_ood = HeatWorld3D(nx=N, ny=N, nz=N, **OPTS)
-w_ood.init(hot_spot(4, 4, 4))
+w_ood.init(hot_spot(*OOD_A))
 for _ in range(20):
     w_ood.step()
 err_out = holo.recon_error(w_ood.flat())
@@ -99,7 +146,7 @@ holo.collect(w_ood.flat().copy())
 holo.build(r=R)
 err_same_after = holo.recon_error(w_ood.flat())
 w_ood2 = HeatWorld3D(nx=N, ny=N, nz=N, **OPTS)
-w_ood2.init(hot_spot(15, 15, 5))
+w_ood2.init(hot_spot(*OOD_B))
 for _ in range(20):
     w_ood2.step()
 err_other_after = holo.recon_error(w_ood2.flat())
@@ -138,7 +185,7 @@ if fit_a:
 
 # ---- 样本外自由演化（这才是真正的预测）----
 w4 = HeatWorld3D(nx=N, ny=N, nz=N, **OPTS)
-w4.init(hot_spot(CENTER, CENTER, CENTER))
+w4.init(hot_spot(*ORIGIN))
 for _ in range(TRAIN_STEPS):
     w4.step()                                    # 推进到训练段末
 psi_l = holo_l4.project(w4.flat())

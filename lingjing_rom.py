@@ -154,16 +154,84 @@ class HeatWorld3D:
         self.sources = np.zeros((self.nz, self.ny, self.nx), dtype=np.float64)
         self.time = 0.0
 
-    def init(self, f: Callable[[int, int, int], float]) -> np.ndarray:
-        """设置初始场 f(i, j, k) -> value；两轨统一在 init 施加边界。"""
-        kk, jj, ii = np.meshgrid(np.arange(self.nz), np.arange(self.ny),
-                                 np.arange(self.nx), indexing="ij")
+    # ------------------------------------------------------------------
+    # 世界坐标系：唯一原点 (0,0,0) 在网格【正中心】，X/Y/Z 各有正负半轴。
+    # 网格取奇数时原点落在真实格点上（n=21 → 索引 10 的坐标恰为 0，正负各 10 格）；
+    # 取偶数时原点落在两格点中间，world()["origin_on_grid_point"] 会如实报 False。
+    # 物理坐标 x = (i - ox)·dx ，反过来 i = round(x/dx + ox)。
+    # ------------------------------------------------------------------
+    @property
+    def ox(self) -> float:
+        return (self.nx - 1) / 2.0
+
+    @property
+    def oy(self) -> float:
+        return (self.ny - 1) / 2.0
+
+    @property
+    def oz(self) -> float:
+        return (self.nz - 1) / 2.0
+
+    def x_of(self, i: int) -> float:
+        return (i - self.ox) * self.dx
+
+    def y_of(self, j: int) -> float:
+        return (j - self.oy) * self.dx
+
+    def z_of(self, k: int) -> float:
+        return (k - self.oz) * self.dx
+
+    def i_of(self, x: float) -> int:
+        return int(round(x / self.dx + self.ox))
+
+    def j_of(self, y: float) -> int:
+        return int(round(y / self.dx + self.oy))
+
+    def k_of(self, z: float) -> int:
+        return int(round(z / self.dx + self.oz))
+
+    def index_at(self, x: float, y: float, z: float) -> int:
+        """世界坐标 -> (k,j,i)；越界返回 (-1,-1,-1)。"""
+        i, j, k = self.i_of(x), self.j_of(y), self.k_of(z)
+        if not (0 <= i < self.nx and 0 <= j < self.ny and 0 <= k < self.nz):
+            return -1
+        return self.idx(i, j, k)
+
+    def idx(self, i: int, j: int, k: int) -> int:
+        return (k * self.ny + j) * self.nx + i
+
+    def coords_of(self, p: int) -> Tuple[float, float, float]:
+        i = p % self.nx
+        j = (p // self.nx) % self.ny
+        k = p // (self.nx * self.ny)
+        return self.x_of(i), self.y_of(j), self.z_of(k)
+
+    def world(self) -> dict:
+        return {
+            "xmin": self.x_of(0), "xmax": self.x_of(self.nx - 1),
+            "ymin": self.y_of(0), "ymax": self.y_of(self.ny - 1),
+            "zmin": self.z_of(0), "zmax": self.z_of(self.nz - 1),
+            "dx": self.dx,
+            "origin_index": [self.ox, self.oy, self.oz],
+            "origin_on_grid_point": float(self.ox).is_integer()
+            and float(self.oy).is_integer() and float(self.oz).is_integer(),
+        }
+
+    def init(self, f: Callable[[float, float, float], float]) -> np.ndarray:
+        """设置初始场 f(x, y, z) -> value，坐标为【物理世界坐标，带正负】，不是网格索引。"""
+        ii, jj, kk = np.meshgrid(np.arange(self.nx), np.arange(self.ny),
+                                 np.arange(self.nz), indexing="ij")
+        xs = (ii - self.ox) * self.dx
+        ys = (jj - self.oy) * self.dx
+        zs = (kk - self.oz) * self.dx
         vf = np.vectorize(f, otypes=[np.float64])
-        self.field = vf(ii, jj, kk).astype(np.float64)
+        self.field = vf(xs, ys, zs).astype(np.float64)
         self._apply_boundary()
         return self.field
 
-    def set_source(self, i: int, j: int, k: int, v: float) -> None:
+    def set_source(self, x: float, y: float, z: float, v: float) -> None:
+        """源/汇（正加热、负冷却），坐标为物理世界坐标。"""
+        i, j, k = self.i_of(x), self.j_of(y), self.k_of(z)
         if 0 <= i < self.nx and 0 <= j < self.ny and 0 <= k < self.nz:
             self.sources[k, j, i] = float(v)
 
@@ -201,6 +269,10 @@ class HeatWorld3D:
     def slice_z(self, k: int) -> np.ndarray:
         """取 z=k 的切片，shape (ny, nx)。"""
         return self.field[k]
+
+    def slice_at_z(self, z: float) -> np.ndarray:
+        """按【物理坐标】取 z 平面切片（取最近的一层），shape (ny, nx)。"""
+        return self.field[self.k_of(z)]
 
     def stats(self) -> Dict[str, float]:
         return {"max": float(self.field.max()),
@@ -254,17 +326,34 @@ class HoloMap:
         vals, vecs = vals[order], vecs[:, order]
         self.all_lambda = vals[vals > 0.0]
 
+        # ★ 数值秩护栏（两道），与 JS 轨同款。
+        # 谱会衰减到浮点噪声层，那里的"模态"不是物理方向而是数值垃圾：
+        # 彼此不正交（JS 侧实测 Gram 非对角元达 0.876；Python/LAPACK 侧 4.5e-5），
+        # 加进基里不会降误差，只会污染。
+        # 第一道 · λ 噪声地板：λ_m ≤ λ_max·1e-12 不取。
+        # 第二道 · 修正 Gram-Schmidt 重正交：保证 ΦᵀΦ = I（正交投影的前提），
+        #          正交后残余过小者（与已有模态线性相关）丢弃。
         rr = min(int(r), T - 1)
+        lam_max = float(max(vals[0], 0.0)) if vals.size else 0.0
+        noise_floor = lam_max * 1e-12
         modes, lam = [], []
         for m in range(rr):
             lv = float(max(vals[m], 0.0))
-            if lv <= 1e-14:
+            if lv <= noise_floor:                    # 第一道
                 break
             mode = Xc @ vecs[:, m]
             nrm = float(np.linalg.norm(mode))
             if nrm < 1e-14:
                 continue
-            modes.append(mode / nrm)
+            mode = mode / nrm
+            if modes:                                # 第二道：两轮 MGS
+                Q = np.stack(modes, axis=1)          # (N, k)
+                for _ in range(2):
+                    mode = mode - Q @ (Q.T @ mode)
+            n2 = float(np.linalg.norm(mode))
+            if n2 < 1e-3:                            # 与已有模态近乎线性相关 → 丢弃
+                continue
+            modes.append(mode / n2)
             lam.append(lv)
 
         if not modes:

@@ -17,17 +17,22 @@
 const { HeatWorld3D, HoloMap, fitLinear, fitAffine, predict, predictAffine } = require('./rom.js');
 
 // ---- 场景参数（两轨必须一致）----
-const N = 20;                 // 每边格点数 → N³ = 8000 自由度
+// N 取【奇数】：原点 (0,0,0) 才能落在真实格点上，正负各 (N-1)/2 格
+const N = 21;                 // 每边格点数 → N³ = 9261 自由度
 const SIGMA = 3.0;
-const CENTER = (N - 1) / 2;
 const TRAIN_STEPS = 40;       // 训练段：t=0..40
 const TEST_STEPS = 20;        // 测试段：继续步进到 t=60（基未见过）
 const SNAP_EVERY = 2;
 const R = 8;
 const H = 6;                  // L4 多步预测步数
 
-const hotSpot = (cx, cy, cz) => (i, j, k) => {
-  const d = (i - cx) ** 2 + (j - cy) ** 2 + (k - cz) ** 2;
+// ⚠️ 热点位置一律用【物理世界坐标】（带正负），不再是网格索引
+const ORIGIN = [0, 0, 0];                 // 世界原点
+const OOD_A = [-6, -6, -6];               // 分布外状态 1（负象限）
+const OOD_B = [5, 5, -6];                 // 分布外状态 2（x,y 正 z 负）
+
+const hotSpot = (cx, cy, cz) => (x, y, z) => {
+  const d = (x - cx) ** 2 + (y - cy) ** 2 + (z - cz) ** 2;
   return Math.exp(-d / (2 * SIGMA * SIGMA));
 };
 const OPTS = { alpha: 0.2, dt: 0.5, dx: 1.0, boundary: 0.0 };
@@ -39,8 +44,41 @@ console.log('=== 灵境 3D 验真 · JS 轨 ===');
 
 // ==================== L1+L2：三维热传导演化 ====================
 const w = new HeatWorld3D(N, N, N, OPTS);
-w.init(hotSpot(CENTER, CENTER, CENTER));
+w.init(hotSpot(ORIGIN[0], ORIGIN[1], ORIGIN[2]));
 console.log(`网格 ${N}×${N}×${N} = ${w.N} 自由度 | λ=α·dt/dx²=${w.lam.toFixed(6)} (3D CFL 上限 0.166667)`);
+
+// ==================== 坐标系自检：唯一原点 + XYZ 正负半轴 ====================
+/* 世界不是数组。这里必须能回答：原点在哪里？正负方向有没有？往返映射对不对？ */
+{
+  let pass = 0, fail = 0;
+  const ck = (name, cond) => { if (cond) { pass++; } else { fail++; console.log('  ❌ ' + name); } };
+  const wd = w.world();
+  console.log(`坐标系：原点 (0,0,0) 位于网格 [${wd.originIndex.join(', ')}]，`
+    + `范围 x∈[${wd.xmin}, ${wd.xmax}] y∈[${wd.ymin}, ${wd.ymax}] z∈[${wd.zmin}, ${wd.zmax}]，dx=${wd.dx}`);
+  ck('原点落在真实格点上（N 为奇数）', wd.originOnGridPoint);
+  ck('原点格点坐标为 0', w.xOf(w.iOf(0)) === 0 && w.yOf(w.jOf(0)) === 0 && w.zOf(w.kOf(0)) === 0);
+  ck('X 半轴对称', Math.abs(wd.xmin + wd.xmax) < 1e-12);
+  ck('Y 半轴对称', Math.abs(wd.ymin + wd.ymax) < 1e-12);
+  ck('Z 半轴对称', Math.abs(wd.zmin + wd.zmax) < 1e-12);
+  ck('X 有正负两侧', wd.xmin < 0 && wd.xmax > 0);
+  ck('Y 有正负两侧', wd.ymin < 0 && wd.ymax > 0);
+  ck('Z 有正负两侧', wd.zmin < 0 && wd.zmax > 0);
+  // 八象限各取一点，符号必须与 (sign x, sign y, sign z) 一致
+  let oct = true;
+  for (const sx of [-1, 1]) for (const sy of [-1, 1]) for (const sz of [-1, 1]) {
+    const c = w.coordsOf(w.indexAt(sx * 5, sy * 5, sz * 5));
+    if (Math.sign(c.x) !== sx || Math.sign(c.y) !== sy || Math.sign(c.z) !== sz) oct = false;
+  }
+  ck('八个象限坐标符号正确', oct);
+  // 往返：格点 → 物理坐标 → 格点，必须逐点还原
+  let rt = true;
+  for (let k = 0; k < N; k++) for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    if (w.indexAt(w.xOf(i), w.yOf(j), w.zOf(k)) !== w.idx(i, j, k)) { rt = false; }
+  }
+  ck('格点↔物理坐标 往返逐点一致（' + N + '³ 全查）', rt);
+  ck('越界查询返回 -1', w.indexAt(1e3, 0, 0) === -1);
+  console.log(`  坐标系自检：${pass} 通过 / ${fail} 失败`);
+}
 
 const holo = new HoloMap(w.N, 200);
 const psiSeq = [];
@@ -74,7 +112,7 @@ console.log(`  L5 重建误差 · 分布内(留出) = ${(errIn * 100).toFixed(4)
 
 // ==================== L5：分布外（热点挪到别处） ====================
 const wOOD = new HeatWorld3D(N, N, N, OPTS);
-wOOD.init(hotSpot(4, 4, 4));
+wOOD.init(hotSpot(OOD_A[0], OOD_A[1], OOD_A[2]));
 for (let t = 0; t < 20; t++) wOOD.step();
 const errOut = holo.reconError(wOOD.flat());
 console.log(`  L5 重建误差 · 分布外       = ${(errOut * 100).toFixed(4)}%`);
@@ -84,7 +122,7 @@ holo.collect(wOOD.flat().slice());
 holo.build(R);
 const errSameAfter = holo.reconError(wOOD.flat());
 const wOOD2 = new HeatWorld3D(N, N, N, OPTS);
-wOOD2.init(hotSpot(15, 15, 5));
+wOOD2.init(hotSpot(OOD_B[0], OOD_B[1], OOD_B[2]));
 for (let t = 0; t < 20; t++) wOOD2.step();
 const errOtherAfter = holo.reconError(wOOD2.flat());
 console.log(`  L5 自适应后·同状态         = ${(errSameAfter * 100).toFixed(4)}%（吸收进基，属记忆非泛化）`);
@@ -119,7 +157,7 @@ console.log(`  L4 仿射 ${H} 步(样本内/背答案) = ${relErr(predInA[H], ps
 
 // ---- 样本外自由演化（这才是真正的预测）----
 const w4 = new HeatWorld3D(N, N, N, OPTS);
-w4.init(hotSpot(CENTER, CENTER, CENTER));
+w4.init(hotSpot(ORIGIN[0], ORIGIN[1], ORIGIN[2]));
 for (let t = 0; t < TRAIN_STEPS; t++) w4.step();   // 推进到训练段末 t=TRAIN_STEPS
 let psiL = holoL4.project(w4.flat());
 let psiA = holoL4.project(w4.flat());
