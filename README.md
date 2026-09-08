@@ -65,6 +65,7 @@ python induce_law.py     # 从轨迹反推力律（SINDy 系统辨识，证明�
 python adapt_loop.py     # 自适应闭环 v2：观察→学律(区间)→映射→改律→不动区间；学出的律=经验，跨交互持久、遇新数据更新
 python verify_experience.py  # 经验驱动 E2E：学出的律当 RealWorld3D 的 central_law 跑（贴合真世界 / 硬写律偏离）
 python verify_sensor.py      # 真实世界条件体检：观测≠真值（欠采样+带噪+速度不可测）——朴素差分崩 vs RTS 平滑恢复
+python verify_ground.py      # 地面世界：推花盆（观察→干预→学质量/摩擦/稳度），与 JS 逐位对照
 ```
 
 可选接入真灵数求解器（lingshu-solver，JS 实现，经子进程调用）：
@@ -86,6 +87,7 @@ node verify_physics.js  # 多物理验真（四类场 PDE + 刚体）
 node verify_world.js     # 真实世界验真（原点=地球中心 · 中心引力 + N 体 + 数学规律，G1–G7）
 node verify_experience.js  # 经验驱动 E2E：学出的律当 RealWorld3D 的 centralLaw 跑（与 .py 逐项对照）
 node verify_sensor.js      # 真实世界条件体检（与 .py 量级对照）：朴素差分 σ=0.02 已 12%、σ=0.1 达 318%；RTS 平滑 0.1%→5%
+node verify_ground.js      # 地面世界：推花盆（Housner 摇摆+库仑摩擦），干预响应反推 m̂/μ̂/α̂，经验预测 vs 真实（与 .py 逐位一致）
 # 或直接用浏览器打开 index.html / sim3d.html（sim3d.html 可切换三种物理规律）
 ```
 
@@ -336,6 +338,8 @@ Python 版 `HeatWorld.init()` 立即施加 Dirichlet 边界；JS 版 `init()` �
 | `verify_experience.py` | Python 验真：经验驱动 E2E，与 JS 逐项对照（E1 系数误差 0.06%、E2 学回 1/r³ 修正 +600） |
 | `verify_sensor.js` | Node 验真：**真实世界条件体检**（观测≠真值：欠采样≈33Hz + 位置噪声 + 速度不可直接测）——朴素差分学律 σ=0.02 已 12% 误差、σ=0.1 达 318%；RTS 平滑纪律恢复至 0.1%→5%；含滚动半圈预测校验（完美律误差底）与诚实边界 |
 | `verify_sensor.py` | Python 验真：真实世界条件体检，与 JS 量级对照（B 律 c0 误差 1.84% vs JS 1.85% 等） |
+| `verify_ground.js` | Node 验真：**地面世界**——推花盆（Housner 摇摆块 + 库仑摩擦）：轻推学质量 m̂=J/Δv、滑距学摩擦 μ̂=v0²/2dg、二分扫冲量找翻倒阈值反解稳度 α̂=atan(R/h)，经验预测 vs 真实全一致（被动观察给关联、干预才给因果） |
+| `verify_ground.py` | Python 验真：地面世界推花盆，与 JS **逐位对照**（J*=1.4067、α̂=25.017° 等全部一致） |
 | `lingjing-mcp.js` | **MCP stdio 服务（给 AI Agent 用）**：`world_sim` / `law_learn` / `law_eval` / `experience_get` / `experience_absorb`，零依赖，`--experience <path>` 跨会话经验持久化，`--selftest` 自检 12/12 |
 | `experience.js` | 经验持久存储：μ±δ + nObs 落盘 JSON，`absorb()` 与 `adapt_loop.py` 的 Experience 逐位一致（冲突放大 δ），损坏文件 fail-closed |
 | `index.html` | 浏览器演示（2D）：真场 / 重建场 / 预演场三视图 + 五层状态 + 审计账本 |
@@ -360,6 +364,7 @@ Python 版 `HeatWorld.init()` 立即施加 Dirichlet 边界；JS 版 `init()` �
 ## 八、路线（待版权方拍板）
 
 - [x] 给机器用的接入点（MCP）——**已落**：`lingjing-mcp.js`（world_sim / law_learn / law_eval）+ `--experience` 跨会话经验持久化（experience_get / experience_absorb，冲突放大 δ，双轨逐位对照一致）
+- [x] 地面世界（机器人所在的真实场景）——**已落**：`verify_ground.*` 推花盆双轨（Housner 摇摆 + 库仑摩擦；干预响应反推质量/摩擦/稳度，经验预测 vs 真实一致）。真实世界条件体检（观测≠真值）见 `verify_sensor.*`
 - [x] 扩展到三维 \(\mathcal{M}_{3,1}\)——**已落**：`HeatWorld3D` 双轨 + `verify3d.*` 验真（21³=9261，世界坐标系原点居中、XYZ 分正负）
 - [x] 三维可视化——**已落**：`sim3d.html`（9 个 z 切片三行对照，世界坐标轴图示）
 - [x] 接入多种物理规律——**已落**：四类场 PDE（热传导 / 声波 / 静电势 / 流体输运）+ 刚体，`verify_physics.*` 双轨验真
