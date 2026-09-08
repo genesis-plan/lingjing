@@ -84,8 +84,39 @@ node verify3d.js        # 三维验真（21³=9261，世界坐标 ±10，含坐�
 node verify_physics.js  # 多物理验真（四类场 PDE + 刚体）
 node verify_world.js     # 真实世界验真（原点=地球中心 · 中心引力 + N 体 + 数学规律，G1–G7）
 node verify_experience.js  # 经验驱动 E2E：学出的律当 RealWorld3D 的 centralLaw 跑（与 .py 逐项对照）
-# 或直接用浏览器打开 index.html / sim3d.html / world3d.html（sim3d.html 可切换三种物理规律；world3d.html 看真实世界轨道 + 三律对比）
+# 或直接用浏览器打开 index.html / sim3d.html（sim3d.html 可切换三种物理规律）
 ```
+
+### 给 AI 使用（MCP 接入，推荐）
+
+灵境是给机器用的：`lingjing-mcp.js` 把 `RealWorld3D` 物理引擎包成 **MCP stdio 服务**，Claude / Cursor / Cline / WorkBuddy 等 AI Agent 配好即可直接"观察世界 → 学律 → 验律 → 用经验驱动虚拟世界"。
+
+```bash
+node lingjing-mcp.js --selftest   # 自检（7/7）
+```
+
+MCP 配置（stdio）：
+
+```json
+{
+  "mcpServers": {
+    "lingjing": {
+      "command": "node",
+      "args": ["<lingjing-mcp.js 绝对路径>"]
+    }
+  }
+}
+```
+
+暴露的确定性工具：
+
+| 工具 | 作用 |
+| :--- | :--- |
+| `world_sim` | 建世界（中心律 = 硬写 GM 或经验律 `[c0..c3]`，基 `1/r²,1/r,1,1/r³`）→ 加物体 → 速度 Verlet 步进 → 返回轨迹采样 + 能量/角动量守恒漂移 |
+| `law_learn` | 从轨迹反推中心力律（SINDy/STLSQ + split-half 统计区间 μ±δ）——机器人从真实数据学自己的经验 |
+| `law_eval` | 虚拟律 vs 真实律：力场径向残差 + 同初值多圈轨道分离，自动判"经验贴合 / 设计律偏离" |
+
+直接对 Agent 说的话术示例："用 lingjing 的 world_sim 观察真实世界（law 含 1/r³ 修正），用 law_learn 从轨迹学出经验律，再用 law_eval 分别比较经验律和硬写 GM=1000 的设计律哪个更贴真实世界。"
 
 ---
 
@@ -297,6 +328,7 @@ Python 版 `HeatWorld.init()` 立即施加 Dirichlet 边界；JS 版 `init()` �
 | `adapt_loop.py` | Python 演示：自适应闭环 v2（观察→学律得统计区间→映射→改律），收敛到不动区间；学出的律=机器人经验，跨交互持久、热启动命中、遇新数据融合修正 |
 | `verify_experience.js` | Node 验真：经验驱动 E2E——学出的经验律当 `RealWorld3D.centralLaw` 跑轨道，与真实世界逐圈对照（贴合/相位累积/设计律偏离） |
 | `verify_experience.py` | Python 验真：经验驱动 E2E，与 JS 逐项对照（E1 系数误差 0.06%、E2 学回 1/r³ 修正 +600） |
+| `lingjing-mcp.js` | **MCP stdio 服务（给 AI Agent 用）**：`world_sim`（建世界/步进/轨迹+守恒读数）/ `law_learn`（从轨迹学经验律 μ±δ）/ `law_eval`（虚拟律 vs 真实律），零依赖，`--selftest` 自检 7/7 |
 | `index.html` | 浏览器演示（2D）：真场 / 重建场 / 预演场三视图 + 五层状态 + 审计账本 |
 | `sim3d.html` | 浏览器演示（**三维世界坐标 + 多物理切换**）：原点 (0,0,0) 在正中心、XYZ 分正负；9 个 z 切片（−8…+8）× 真实场 / POD 重建 / 边界纯预测三行对照；下拉切换热传导 / 声波 / 流体输运 |
 | `world3d.html` | 浏览器演示（**极简·经验驱动物理层**）：打开自动播放，一块画布同屏跑三个同初值世界——真实(含1/r³修正)/经验(学出律)/设计(硬写GM)，看经验贴真实、设计随圈数甩开；只有暂停/重置两个按钮 |
