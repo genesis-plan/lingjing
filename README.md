@@ -89,20 +89,20 @@ node verify_experience.js  # 经验驱动 E2E：学出的律当 RealWorld3D 的 
 
 ### 给 AI 使用（MCP 接入，推荐）
 
-灵境是给机器用的：`lingjing-mcp.js` 把 `RealWorld3D` 物理引擎包成 **MCP stdio 服务**，Claude / Cursor / Cline / WorkBuddy 等 AI Agent 配好即可直接"观察世界 → 学律 → 验律 → 用经验驱动虚拟世界"。
+灵境是给机器用的：`lingjing-mcp.js` 把 `RealWorld3D` 物理引擎包成 **MCP stdio 服务**，Claude / Cursor / Cline / WorkBuddy 等 AI Agent 配好即可直接"观察世界 → 学律 → 验律 → **吸收经验（跨会话记忆）** → 用经验驱动虚拟世界"。
 
 ```bash
-node lingjing-mcp.js --selftest   # 自检（7/7）
+node lingjing-mcp.js --selftest   # 自检（12/12：物理 + 学律 + 验律 + 经验持久化）
 ```
 
-MCP 配置（stdio）：
+MCP 配置（stdio）——**带 `--experience <path.json>` 才有跨会话经验记忆**（不带则 `experience_*` fail-closed 拒绝，不静默丢经验）：
 
 ```json
 {
   "mcpServers": {
     "lingjing": {
       "command": "node",
-      "args": ["<lingjing-mcp.js 绝对路径>"]
+      "args": ["<lingjing-mcp.js 绝对路径>", "--experience", "<experience.json 绝对路径>"]
     }
   }
 }
@@ -113,10 +113,14 @@ MCP 配置（stdio）：
 | 工具 | 作用 |
 | :--- | :--- |
 | `world_sim` | 建世界（中心律 = 硬写 GM 或经验律 `[c0..c3]`，基 `1/r²,1/r,1,1/r³`）→ 加物体 → 速度 Verlet 步进 → 返回轨迹采样 + 能量/角动量守恒漂移 |
-| `law_learn` | 从轨迹反推中心力律（SINDy/STLSQ + split-half 统计区间 μ±δ）——机器人从真实数据学自己的经验 |
+| `law_learn` | 从轨迹反推中心力律（SINDy/STLSQ + split-half 统计区间 μ±δ），返回 `nObs`（证据量）——机器人从真实数据学自己的经验 |
 | `law_eval` | 虚拟律 vs 真实律：力场径向残差 + 同初值多圈轨道分离，自动判"经验贴合 / 设计律偏离" |
+| `experience_get` | 读经验：`{nObs, mu, delta, band}`（μ±δ = 机器人"承认的不知道"区间）。**跨会话持久**：上次会话 absorb 的这次还在；`nObs=0` → `delta/band=null`（诚实：还没学过） |
+| `experience_absorb` | 吸收经验：把一次 `law_learn` 的 `(law.mu, law.delta)` 以 `nObs`（轨迹点数，大=可信）精度加权融合进持久经验并落盘；**新经验与旧冲突 → δ 放大 = 承认"我可能错了"**（adapt_loop v2 语义） |
 
-直接对 Agent 说的话术示例："用 lingjing 的 world_sim 观察真实世界（law 含 1/r³ 修正），用 law_learn 从轨迹学出经验律，再用 law_eval 分别比较经验律和硬写 GM=1000 的设计律哪个更贴真实世界。"
+经验闭环话术示例："用 lingjing 的 world_sim 观察真实世界，law_learn 学出经验律（mu/delta/nObs），experience_absorb 存进经验文件；下次会话先用 experience_get 读回经验，再 world_sim({law: state.mu}) 用经验驱动虚拟世界，law_eval 对比经验律 vs 硬写设计律谁更贴真实——若世界漂移，新学到的律会和旧经验冲突，δ 自动放大提醒你'旧经验可能过期了'。"
+
+经验文件 = 机器人的长期记忆：MCP 服务每次被拉起、退出即失忆，`--experience` 让学到的律跨交互留存（对应自适应闭环 v2 的"把学到的规律作为自己的经验，直到以后与真实世界的交互"）。
 
 ---
 
@@ -328,7 +332,8 @@ Python 版 `HeatWorld.init()` 立即施加 Dirichlet 边界；JS 版 `init()` �
 | `adapt_loop.py` | Python 演示：自适应闭环 v2（观察→学律得统计区间→映射→改律），收敛到不动区间；学出的律=机器人经验，跨交互持久、热启动命中、遇新数据融合修正 |
 | `verify_experience.js` | Node 验真：经验驱动 E2E——学出的经验律当 `RealWorld3D.centralLaw` 跑轨道，与真实世界逐圈对照（贴合/相位累积/设计律偏离） |
 | `verify_experience.py` | Python 验真：经验驱动 E2E，与 JS 逐项对照（E1 系数误差 0.06%、E2 学回 1/r³ 修正 +600） |
-| `lingjing-mcp.js` | **MCP stdio 服务（给 AI Agent 用）**：`world_sim`（建世界/步进/轨迹+守恒读数）/ `law_learn`（从轨迹学经验律 μ±δ）/ `law_eval`（虚拟律 vs 真实律），零依赖，`--selftest` 自检 7/7 |
+| `lingjing-mcp.js` | **MCP stdio 服务（给 AI Agent 用）**：`world_sim` / `law_learn` / `law_eval` / `experience_get` / `experience_absorb`，零依赖，`--experience <path>` 跨会话经验持久化，`--selftest` 自检 12/12 |
+| `experience.js` | 经验持久存储：μ±δ + nObs 落盘 JSON，`absorb()` 与 `adapt_loop.py` 的 Experience 逐位一致（冲突放大 δ），损坏文件 fail-closed |
 | `index.html` | 浏览器演示（2D）：真场 / 重建场 / 预演场三视图 + 五层状态 + 审计账本 |
 | `sim3d.html` | 浏览器演示（**三维世界坐标 + 多物理切换**）：原点 (0,0,0) 在正中心、XYZ 分正负；9 个 z 切片（−8…+8）× 真实场 / POD 重建 / 边界纯预测三行对照；下拉切换热传导 / 声波 / 流体输运 |
 | `world3d.html` | 浏览器演示（**极简·经验驱动物理层**）：打开自动播放，一块画布同屏跑三个同初值世界——真实(含1/r³修正)/经验(学出律)/设计(硬写GM)，看经验贴真实、设计随圈数甩开；只有暂停/重置两个按钮 |
@@ -350,11 +355,12 @@ Python 版 `HeatWorld.init()` 立即施加 Dirichlet 边界；JS 版 `init()` �
 
 ## 八、路线（待版权方拍板）
 
+- [x] 给机器用的接入点（MCP）——**已落**：`lingjing-mcp.js`（world_sim / law_learn / law_eval）+ `--experience` 跨会话经验持久化（experience_get / experience_absorb，冲突放大 δ，双轨逐位对照一致）
 - [x] 扩展到三维 \(\mathcal{M}_{3,1}\)——**已落**：`HeatWorld3D` 双轨 + `verify3d.*` 验真（21³=9261，世界坐标系原点居中、XYZ 分正负）
 - [x] 三维可视化——**已落**：`sim3d.html`（9 个 z 切片三行对照，世界坐标轴图示）
 - [x] 接入多种物理规律——**已落**：四类场 PDE（热传导 / 声波 / 静电势 / 流体输运）+ 刚体，`verify_physics.*` 双轨验真
 - [x] 真实世界 + 数学规律层——**已落**：`RealWorld3D`（原点=地球中心 · 中心反平方引力 + N 体 + 弹性碰撞）+ 显式"物理层/数学层"分置 + 几何约束律(MG)/不变量律(MI)/Bertrand 律，`verify_world.*` 双轨验真（G1–G7）
-- [ ] 真实世界粒子可视化（`world3d.html`：中心引力下多体轨道 + 球面几何约束律可视化）——核心+验真已落，可视化待做
+- [x] 真实世界粒子可视化（`world3d.html` 极简版：三律同屏对比 + 暂停/重置两按钮）——**已落**（教训：人类不看渲染，交付物=机器接入点）
 - [ ] 多物理之间的耦合（多场耦合，如热对流、磁流体）
 - [ ] 弹性 / 电磁 PDE
 - [ ] 接入完整灵脑内核（八元组、M1–M4 证明模块、SHA-256+HMAC 单写者账本）

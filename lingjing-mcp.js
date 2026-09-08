@@ -4,30 +4,54 @@
  * ============================================================================
  * 灵境是给机器（AI Agent）用的，不是给人看的。本文件把 rom.js 里已验证的真实
  * 世界物理引擎（RealWorld3D，速度 Verlet）包成 **MCP stdio 服务**：AI Agent 通过
- * 三个确定性工具直接"使用"虚拟世界——
+ * 五个确定性工具直接"使用"虚拟世界——
  *
- *   world_sim  观察/驱动：建世界（可指定中心律：硬写 GM 或学出的经验律 [c0..c3]
- *              = [1/r²,1/r,1,1/r³] 系数）、加物体、步进、返回轨迹与守恒漂移读数；
- *   law_learn  学律：从轨迹反推中心力律（SINDy/STLSQ + split-half 统计区间 μ±δ）；
- *   law_eval   验律：虚拟律 vs 真实律 = 力场径向残差 + 同初值多圈轨道分离，
- *              自动判"经验律贴合 / 硬写设计律偏离"。
+ *   world_sim          观察/驱动：建世界（可指定中心律：硬写 GM 或学出的经验律
+ *                      [c0..c3] = [1/r²,1/r,1,1/r³] 系数）、加物体、步进、返回
+ *                      轨迹与守恒漂移读数；
+ *   law_learn          学律：从轨迹反推中心力律（SINDy/STLSQ + split-half 统计
+ *                      区间 μ±δ），返回 nObs（轨迹点数，作证据权重）；
+ *   law_eval           验律：虚拟律 vs 真实律 = 力场径向残差 + 同初值多圈轨道
+ *                      分离，自动判"经验律贴合 / 硬写设计律偏离"；
+ *   experience_get     读经验：跨会话持久 —— 上次会话 absorb 的还在不在；
+ *   experience_absorb  吸收经验：把 law_learn 的 (μ,δ) 以 nObs 加权融合进持久
+ *                      经验并落盘；与新经验冲突 → δ 放大（承认"我可能错了"）。
+ *
+ * 经验持久化：启动加 `--experience <path.json>`。不带 = 无持久（experience_*
+ * 工具 fail-closed 拒绝，不静默丢弃）。机器人每次会话被拉起、退出即失忆 ——
+ * 经验文件就是它跨交互的记忆（adapt_loop v2 的机器化）。
  *
  * 传输：JSON-RPC 2.0 + Content-Length 分帧（stdio）。零外部依赖，无需 npm install。
  * 诚实边界：全部确定性数值；singularity fail-closed；能学≠真理（受候选基限制）；
- * 学出的律只在本训练区段可信、长程相位累积漂移 → 经验需持续被真实数据校正。
+ * 学出的律只在本训练区段可信、长程相位累积漂移 → 经验需持续被真实数据校正；
+ * 经验 μ±δ 的 δ 只含统计性不确定，不含基可辨识性的系统偏差。
  *
  * 运行/自检：  node lingjing-mcp.js --selftest
  * Agent 接入（MCP 配置）：
  *   { "mcpServers": { "lingjing": { "command": "node",
- *       "args": ["/绝对路径/lingjing-mcp.js"] } } }
+ *       "args": ["/绝对路径/lingjing-mcp.js", "--experience", "/绝对路径/experience.json"] } } }
  */
 'use strict';
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const ROM = require('./rom.js');
 const RW = ROM.RealWorld3D;
 const lstsq = ROM.lstsq;
+const ExperienceStore = require('./experience.js');
+
+/* ------------------------------------------------ 经验存储（--experience） */
+const _expArg = process.argv.indexOf('--experience');
+const expPath = _expArg !== -1 ? process.argv[_expArg + 1] : null;
+let store = null;
+if (expPath) {
+  try { store = new ExperienceStore(expPath); }
+  catch (e) {
+    console.error('[lingjing-mcp] 经验文件加载失败（fail-closed 拒启）: ' + e.message);
+    process.exit(1);
+  }
+}
 
 /* ---------------------------------------------------------------- 核心工具 */
 const B_LABELS = ['1/r²', '1/r', '1', '1/r³'];
@@ -90,6 +114,40 @@ function checkLaw(law) {
     throw new Error('law 必须是 4 个有限数的数组 [c0,c1,c2,c3]（基 1/r²,1/r,1,1/r³）');
   }
   return law;
+}
+
+function checkMuDelta(p) {
+  const mu = checkLaw(p.mu);
+  const delta = checkLaw(p.delta);
+  if (!mu || !delta) throw new Error('experience_absorb 需要 mu 与 delta（law_learn 的 law.mu / law.delta）');
+  if (delta.some(v => v < 0)) throw new Error('delta 需为非负数');
+  return { mu, delta };
+}
+
+/* ------------------------------------------------------------ experience */
+function experienceGet() {
+  if (!store) {
+    return {
+      ok: true,
+      persisted: false,
+      note: '本服务未配置经验持久化（启动缺 --experience <path.json>）。' +
+        'experience_absorb 已被拒绝（fail-closed，不静默丢经验）。要跨会话记忆请加参数重启。'
+    };
+  }
+  const s = store.state();
+  return { ok: true, persisted: true, expPath, state: s };
+}
+
+function experienceAbsorb(p) {
+  if (!store) {
+    throw new Error('未配置经验持久化（启动缺 --experience <path.json>）—— 拒绝吸收，经验不静默丢弃');
+  }
+  const { mu, delta } = checkMuDelta(p);
+  const n = p.nObs;
+  if (!Number.isInteger(n) || n < 1) throw new Error('nObs 需为正整数（= law_learn 返回的 nObs，该次拟合轨迹点数）');
+  store.absorb(mu, delta, n);
+  store.save();
+  return { ok: true, persisted: true, expPath, state: store.state() };
 }
 
 /* ------------------------------------------------------------ world_sim */
@@ -159,6 +217,7 @@ function lawLearn(p) {
     ok: true,
     law: { basis: B_LABELS, mu, delta },
     dominant: dom,
+    nObs: pos.length,   // 本次拟合的证据量（experience_absorb 的权重）
     fitResidual: +(split ? r.resid : r.resid).toFixed(6),
     note: 'mu=经验律均值，delta=split-half 统计半宽（只含噪声性不确定，不含基可辨识性系统偏差）；' +
       '能学什么由候选基（数学先验）决定；该律只在训练区段可信。'
@@ -275,7 +334,7 @@ const TOOLS = [
   },
   {
     name: 'law_learn',
-    description: '灵境·从真实世界轨迹学中心力律（SINDy/STLSQ + split-half）：输入 world_sim 返回的 trajectory（pos/vel 采样点），输出经验律 μ±δ（基 [1/r²,1/r,1,1/r³]）与拟合残差。能学什么由候选基(数学先验)决定；μ 只在本训练区段可信。',
+    description: '灵境·从真实世界轨迹学中心力律（SINDy/STLSQ + split-half）：输入 world_sim 返回的 trajectory（pos/vel 采样点），输出经验律 μ±δ（基 [1/r²,1/r,1,1/r³]）与拟合残差、nObs（证据量=轨迹点数，供 experience_absorb 作权重）。能学什么由候选基(数学先验)决定；μ 只在本训练区段可信。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -302,6 +361,24 @@ const TOOLS = [
       },
       required: ['truthLaw', 'modelLaw']
     }
+  },
+  {
+    name: 'experience_get',
+    description: '灵境·读经验（跨会话持久记忆）：返回机器人当前持有的经验律 state={nObs, mu, delta, band}。上次会话 experience_absorb 过、这次还能 get 到。nObs=0 → delta/band=null（诚实：还没学过）。未配置 --experience → persisted:false。',
+    inputSchema: { type: 'object', properties: {} }
+  },
+  {
+    name: 'experience_absorb',
+    description: '灵境·吸收经验：把一次 law_learn 的 (law.mu, law.delta) 以证据量 nObs（=law_learn 返回的 nObs，该次拟合轨迹点数；n 大=可信）精度加权融合进持久经验并落盘。新经验与旧经验冲突 → δ 放大=承认不确定（"我可能错了"，adapt_loop 语义）。需要服务端启动带 --experience <path.json>，否则 fail-closed 拒绝。融合后可 world_sim({law: state.mu}) 用经验驱动虚拟世界。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        mu: { type: 'array', items: { type: 'number' }, description: 'law_learn 返回的 law.mu [c0..c3]' },
+        delta: { type: 'array', items: { type: 'number' }, description: 'law_learn 返回的 law.delta（可全 0）' },
+        nObs: { type: 'integer', description: 'law_learn 返回的 nObs（轨迹点数，证据权重）' }
+      },
+      required: ['mu', 'delta', 'nObs']
+    }
   }
 ];
 
@@ -310,6 +387,8 @@ function callTool(name, p) {
     case 'world_sim': return JSON.stringify(worldSim(p), null, 1);
     case 'law_learn': return JSON.stringify(lawLearn(p), null, 1);
     case 'law_eval': return JSON.stringify(lawEval(p), null, 1);
+    case 'experience_get': return JSON.stringify(experienceGet(), null, 1);
+    case 'experience_absorb': return JSON.stringify(experienceAbsorb(p), null, 1);
     default: throw new Error('未知工具: ' + name);
   }
 }
@@ -319,7 +398,7 @@ function handle(msg) {
     if (msg.method === 'initialize') {
       send({ jsonrpc: '2.0', id: msg.id, result: {
         protocolVersion: '2024-11-05', capabilities: { tools: {} },
-        serverInfo: { name: 'lingjing-mcp', version: '1.0.0' }
+        serverInfo: { name: 'lingjing-mcp', version: '1.1.0' }
       } });
     } else if (msg.method === 'tools/list') {
       send({ jsonrpc: '2.0', id: msg.id, result: { tools: TOOLS } });
@@ -362,5 +441,33 @@ if (process.argv.includes('--selftest')) {
   // 4) fail-closed：r < rMin 拒启
   const fc = worldSim({ bodies: [{ pos: [0.1, 0, 0], vel: [0, 0, 0] }], steps: 10 });
   A('world_sim 奇点 fail-closed', fc.ok === false && /奇点/.test(fc.error || ''), String(fc.error));
+  // 5) 经验持久化：空 → 首次吸收(采纳) → 跨实例读回(=模拟重启) → 冲突放大 δ
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lingjing-exp-'));
+  const tmpFile = path.join(tmpDir, 'experience.json');
+  try {
+    const e1 = new ExperienceStore(tmpFile);
+    const st0 = e1.state();
+    A('experience 空态 nObs=0 / band=null', st0.nObs === 0 && st0.delta === null && st0.band === null, JSON.stringify(st0));
+    e1.absorb([-1001, 0, 0, 600], [10, 0, 0, 50], 6000);
+    e1.save();
+    const ok1 = e1.state().nObs === 6000 && e1.state().mu[0] === -1001 && e1.state().delta[0] === 10 && e1.state().band.lo[0] === -1011;
+    A('experience 首次吸收=直接采纳', ok1, JSON.stringify(e1.state()));
+    const e2 = new ExperienceStore(tmpFile);            // 新实例读同一文件 = 模拟"重启后跨会话"
+    const st2 = e2.state();
+    const ok2 = st2.nObs === 6000 && st2.mu[0] === -1001 && st2.delta[3] === 50;
+    A('experience 跨实例/跨会话读回一致', ok2, 'nObs=' + st2.nObs + ' mu0=' + st2.mu[0] + ' delta3=' + st2.delta[3]);
+    e2.absorb([-800, 0, 0, 400], [10, 0, 0, 50], 6000);   // 冲突：μ0 从 −1001 挪到 −900.5
+    const st3 = e2.state();
+    const expMu0 = (-1001 * 6000 + -800 * 6000) / 12000;
+    const expD0 = Math.max(Math.sqrt((6000 * 100 + 6000 * 100) / 12000), Math.abs(expMu0 - (-800))); // max(pooled=10, conflict=100.5)
+    A('experience 冲突放大 δ（承认不确定）', Math.abs(st3.mu[0] - expMu0) < 1e-9 && Math.abs(st3.delta[0] - expD0) < 1e-9,
+      'mu0=' + st3.mu[0].toFixed(4) + '(期望' + expMu0.toFixed(4) + ') δ0=' + st3.delta[0].toFixed(4) + '(期望' + expD0.toFixed(4) + ')');
+    e2.save();
+    const e3 = new ExperienceStore(tmpFile);            // 再"重启"：融合后的经验仍在
+    const st4 = e3.state();
+    A('experience 融合后持久化读回', st4.nObs === 12000 && Math.abs(st4.mu[0] - expMu0) < 1e-9, 'nObs=' + st4.nObs);
+  } finally {
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (e) { /* 忽略清理失败 */ }
+  }
   console.log(process.exitCode ? '\nSELFTEST FAILED' : '\nSELFTEST PASSED');
 }
