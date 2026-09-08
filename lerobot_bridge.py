@@ -113,7 +113,7 @@ def characterize(xsf, H, label):
     quiet = sum(1 for a in accs if a < 0.05 * max(v_max, 1e-9) / H)
     quiet_frac = quiet / len(accs) if accs else 0.0
     print(f'  [{label}] 帧数={M} 采样率={1/H:.1f}Hz')
-    print(f'    峰值速度={v_max:.4f} (单位/步)  峰值加速度={a_max:.4f}')
+    print(f'    峰值速度={v_max:.4f} (单位/秒, RTS在采样间隔H上估计)  峰值加速度={a_max:.4f}')
     print(f'    近匀速段占比={quiet_frac*100:.1f}%（真实机器人多为"快移+停顿/精修"，非连续匀加速）')
     return v_max, a_max, quiet_frac
 
