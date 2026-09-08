@@ -60,6 +60,8 @@ pip install numpy
 python verify.py        # 2D 五层验真
 python verify3d.py      # 三维验真（与 JS 轨逐项对照）
 python verify_physics.py  # 多物理验真（四类场 PDE + 刚体，与 JS 轨逐项对照）
+python verify_world.py    # 真实世界验真（原点=地球中心 · 中心引力 + 多体 + 数学规律）
+python induce_law.py     # 从轨迹反推力律（SINDy 系统辨识，证明物理层可从数据学习）
 ```
 
 可选接入真灵数求解器（lingshu-solver，JS 实现，经子进程调用）：
@@ -212,6 +214,8 @@ Python 的 `np.linalg.lstsq`（SVD）直接解原方程、不平方条件数，�
 球面几何约束、守恒不变量、Bertrand 闭合椭圆是"结构/对称的必然结论"（数学层），二者可被同一套验真
 逐位交叉验证——这正是灵境"物理想象力引擎"要同时承载的两类规律。
 
+**物理层不只能硬写，也能从真实轨迹学习**：见 `induce_law.py`——用 SINDy(STLSQ) 从中心力轨迹反推力律，案例1 干净恢复 `1/r²`（−1000.6 vs 真实 −1000），案例2 正确抓出额外 `1/r³` 修正项。但"能学什么"完全由候选基（数学先验）决定：基里没有的项永远学不到；学出的律只在本训练区段可信、可证伪不可证明。
+
 ---
 
 ## 五、诚实边界（请务必读）
@@ -281,6 +285,7 @@ Python 版 `HeatWorld.init()` 立即施加 Dirichlet 边界；JS 版 `init()` �
 | `verify_physics.py` | Python 验真：多物理，与 JS 逐项对照 |
 | `verify_world.js` | Node 验真：真实世界（中心引力 + N 体 + 几何约束律/不变量律/Bertrand 律，G1–G7） |
 | `verify_world.py` | Python 验真：真实世界，与 JS 逐项对照 |
+| `induce_law.py` | Python 演示：从轨迹用 SINDy(STLSQ) 稀疏回归反推中心力律，证明物理层可从数据学习（受候选基=数学先验约束） |
 | `index.html` | 浏览器演示（2D）：真场 / 重建场 / 预演场三视图 + 五层状态 + 审计账本 |
 | `sim3d.html` | 浏览器演示（**三维世界坐标 + 多物理切换**）：原点 (0,0,0) 在正中心、XYZ 分正负；9 个 z 切片（−8…+8）× 真实场 / POD 重建 / 边界纯预测三行对照；下拉切换热传导 / 声波 / 流体输运 |
 | `lingnao-decision.js` | 灵脑风格可审计决策核（哈希链 + FIREWALL + fail-closed） |
