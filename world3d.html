@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>灵境 · 真实世界 RealWorld3D（地球中心引力 + 数学规律 + 经验驱动）</title>
+<style>
+  :root{
+    --bg:#f4f6f8; --card:#ffffff; --ink:#1f2328; --ink2:#5b6570;
+    --line:#e3e7ec; --accent:#2f6feb; --warn:#b45309; --bad:#c0392b; --ok:#1e7e46;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:"Microsoft YaHei","PingFang SC","Noto Sans CJK SC",system-ui,sans-serif;
+    line-height:1.7;font-size:14px}
+  .wrap{max-width:1180px;margin:0 auto;padding:20px 18px 60px}
+  h1{font-size:22px;margin:0 0 4px}
+  .sub{color:var(--ink2);font-size:13px;margin-bottom:16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:14px}
+  .card h2{font-size:15px;margin:0 0 10px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  .bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  button{font-family:inherit;font-size:13px;padding:7px 14px;border-radius:7px;cursor:pointer;
+    border:1px solid var(--line);background:#fff;color:var(--ink)}
+  button:hover{border-color:var(--accent);color:var(--accent)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.primary:hover{opacity:.88;color:#fff}
+  select{font-family:inherit;font-size:13px;padding:6px 10px;border-radius:7px;cursor:pointer;
+    border:1px solid var(--line);background:#fff;color:var(--ink)}
+  select:hover{border-color:var(--accent)}
+  .ctl{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ink2)}
+  .ctl input[type=range]{width:110px}
+  .ctl b{color:var(--ink);font-variant-numeric:tabular-nums;min-width:20px;display:inline-block}
+  label.chk{display:inline-flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;
+    border:1px solid var(--line);border-radius:7px;padding:5px 10px;background:#fff}
+  label.chk:hover{border-color:var(--accent)}
+  table{border-collapse:collapse;width:100%;font-size:13px}
+  th,td{border:1px solid var(--line);padding:5px 10px;text-align:left}
+  th{background:#fafbfc;font-weight:600;color:var(--ink2)}
+  td.num{font-variant-numeric:tabular-nums;font-family:Consolas,"Courier New",monospace;text-align:right}
+  canvas{display:block;background:#0d1117;border-radius:8px}
+  .rowlab{font-size:13px;font-weight:600;margin:10px 0 4px}
+  .rowlab span{font-weight:400;color:var(--ink2);font-size:12px;margin-left:8px}
+  .note{background:#fff8ed;border:1px solid #f0d9a8;border-radius:8px;padding:10px 14px;font-size:13px;color:#6b4a12;margin:10px 0}
+  .note b{color:#7c3d05}
+  .flex{display:flex;gap:14px;flex-wrap:wrap}
+  .flex>div{flex:1;min-width:300px}
+  .lg{display:flex;gap:16px;font-size:12px;color:var(--ink2);flex-wrap:wrap}
+  .lg i{display:inline-block;width:14px;height:3px;border-radius:2px;vertical-align:middle;margin-right:5px}
+  code{background:#f0f2f5;padding:1px 5px;border-radius:4px;font-size:12px}
+  .dim{color:var(--ink2);font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>灵境 · 真实世界 RealWorld3D</h1>
+  <div class="sub">以原点为<b>地球中心</b>，物体受中心引力（默认 −GM/r²，或换成<b>学出的经验律</b>）运动；数学层（守恒不变量 / 球面几何约束 / 闭合椭圆）与物理层分置。全部实算（速度 Verlet），不是渲染动画。验真数字见 <code>verify_world</code>（G1–G7）与 <code>verify_experience</code>（经验律 E2E）。</div>
+
+  <div class="card">
+    <h2>控制台</h2>
+    <div class="bar" style="margin-bottom:8px">
+      <label class="ctl">初态预设
+        <select id="presetSel">
+          <option value="near" selected>近圆轨道（r=10）</option>
+          <option value="ell">椭圆轨道（v=8）</option>
+          <option value="two">双卫星（对置同轨 + 互引力）</option>
+          <option value="escape">逃逸速度（双曲掠过）</option>
+          <option value="inc">倾斜轨道（出 XY 平面，看侧视图）</option>
+        </select>
+      </label>
+      <label class="ctl">世界模式
+        <select id="modeSel">
+          <option value="single" selected>单世界（选中心律）</option>
+          <option value="compare">三律对比：真实 vs 经验 vs 设计</option>
+        </select>
+      </label>
+      <label class="ctl">中心律
+        <select id="lawSel">
+          <option value="design" selected>设计律 · 硬写 GM=1000（−1000/r²）</option>
+          <option value="truth">真实律 · −1000/r² + 600/r³（含设计外修正）</option>
+          <option value="exp">经验律 · 学自真实轨迹（μ≈[−1000.4, 0,0, 603]）</option>
+        </select>
+      </label>
+    </div>
+    <div class="bar">
+      <label class="chk"><input type="checkbox" id="mutualChk"> 物理层·互引力（N 体）</label>
+      <label class="chk"><input type="checkbox" id="collideChk"> 物理层·弹性碰撞</label>
+      <label class="chk"><input type="checkbox" id="sphereChk"> 数学层·球面约束（R=12，纯结构非力）</label>
+      <label class="chk"><input type="checkbox" id="consChk" checked> 数学层·守恒不变量读数（能量/角动量）</label>
+      <button id="btnPlay" class="primary">▶ 播放</button>
+      <button id="btnStep">单步</button>
+      <button id="btnReset">↺ 重置</button>
+      <label class="ctl">步进速度
+        <input type="range" id="spdRange" min="1" max="8" value="2"><b id="spdVal">2</b>
+      </label>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>轨道视图 <span class="dim">XY 俯视（主）· XZ 侧视（看是否出平面）· 中心金色 = 原点/地球</span></h2>
+    <div class="lg" id="legend">
+      <span><i style="background:#e8c46a"></i>中心地球(原点)</span>
+      <span id="lgTruth"><i style="background:#9ad0ff"></i>真实世界</span>
+      <span id="lgExp"><i style="background:#6fe3a0"></i>经验虚拟世界（学出的律）</span>
+      <span id="lgDesign"><i style="background:#ff8f8f"></i>设计虚拟世界（硬写 GM，漏 1/r³）</span>
+    </div>
+    <canvas id="cvMain" width="640" height="640"></canvas>
+    <canvas id="cvSide" width="640" height="120" style="margin-top:6px"></canvas>
+    <p class="dim" id="sideNote" style="margin:2px 0 0"></p>
+  </div>
+
+  <div class="flex">
+    <div class="card">
+      <h2>守恒不变量读数（数学层 · MI）</h2>
+      <table id="consTable">
+        <thead><tr><th>世界</th><th>能量漂移 %</th><th>|角动量| 漂移 %</th><th>相对真实分离 %</th></tr></thead>
+        <tbody><tr><td class="dim" colspan="4">（播放后更新）</td></tr></tbody>
+      </table>
+      <p class="dim" style="margin:8px 0 0" id="consNote">单世界模式下为当前世界读数；三律对比模式逐行列出。能量/角动量由时间平移/旋转对称（诺特定理）推出并显式测量漂移。</p>
+    </div>
+    <div class="card">
+      <h2>数学规律指示</h2>
+      <table>
+        <tr><th>规律</th><th>读数</th></tr>
+        <tr><td>Bertrand（反平方专属）：离心率矢量 |e_vec|</td><td class="num" id="outEvec">—</td></tr>
+        <tr><td>球面约束满足度 max|r−R|（仅开球约束）</td><td class="num" id="outSphere">—</td></tr>
+        <tr><td>轨道 r 范围</td><td class="num" id="outR">—</td></tr>
+        <tr><td>已推进时间 / 圈数（近圆≈4.0/圈）</td><td class="num" id="outOrb">—</td></tr>
+      </table>
+      <p class="dim" style="margin:8px 0 0">e_vec 守恒只在<b>纯反平方律</b>下成立（Bertrand 定理）；含 1/r³ 修正的"真实/经验律"世界会进动，e_vec 不再守恒——这正是验真里"真实≠设计"的证据。</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>三律对比模式（经验驱动演示）</h2>
+    <p style="margin:0">把世界模式切到「三律对比」，三个世界从<b>同一初值</b>出发、各跑各的中心律：
+      真实律（含 1/r³ 修正）＝现实；经验律＝从真实轨迹学出的 μ（见 <code>verify_experience</code>）；
+      设计律＝工程师硬写 GM=1000（漏掉 1/r³ 修正）。<b>经验世界贴着真实轨道跑，设计世界随圈数明显偏离</b>（验真数字：15 圈 max 分离 1.2% vs 267%，约 210×）。
+      偏离不是 bug，是"硬写设计 ≠ 现实"的量化；而经验世界短程贴合、长程也会因相位累积慢慢漂——所以经验必须持续被真实数据校正（自适应闭环 v2）。</p>
+  </div>
+
+  <div class="note"><b>诚实边界：</b>① 物理层（力→运动）与数学层（对称/约束的必然结论）分置：球面约束是每步投影的<b>纯结构</b>，把径向引力"约束掉"，物体做匀速圆周——它<b>不守恒物理能量</b>，只报约束满足度；② 守恒量读数在"球约束开启"时仅对约束前的自由运动有物理意义；③ 无广义相对论、无潮汐、碰撞为简化弹性；④ 本页"真实律"仍是我们设定的合成世界，传感器桥未接真机（诚实标注）。</div>
+
+  <script src="rom.js"></script>
+  <script>
+    (function () {
+      var R = window.LingJingROM;
+      if (!R || !R.RealWorld3D) { document.body.innerHTML = '<p style="padding:40px">rom.js 未加载：请把 world3d.html 与 rom.js 放在同一目录。</p>'; return; }
+      var RW = R.RealWorld3D;
+
+      var D = {
+        preset: document.getElementById('presetSel'),
+        mode: document.getElementById('modeSel'),
+        law: document.getElementById('lawSel'),
+        mutual: document.getElementById('mutualChk'),
+        collide: document.getElementById('collideChk'),
+        sphere: document.getElementById('sphereChk'),
+        cons: document.getElementById('consChk'),
+        play: document.getElementById('btnPlay'),
+        step: document.getElementById('btnStep'),
+        reset: document.getElementById('btnReset'),
+        spd: document.getElementById('spdRange'),
+        spdVal: document.getElementById('spdVal'),
+        cv: document.getElementById('cvMain'),
+        cvSide: document.getElementById('cvSide'),
+        legend: document.getElementById('legend')
+      };
+      function $(id) { return document.getElementById(id); }
+
+      var DT = 0.01, TRAIL = 1400;
+      var LAWS = {
+        design: [-1000, 0, 0, 0],
+        truth: [-1000, 0, 0, 600],
+        exp: [-1000.36, 0, 0, 603.06]      // JS 轨从真实轨迹学出的 μ（verify_experience E2）
+      };
+      var COLOR = { truth: '#9ad0ff', exp: '#6fe3a0', design: '#ff8f8f', white: '#e8e6e1' };
+      var MODES = ['truth', 'exp', 'design'];
+
+      function presetBodies(name, R) {
+        var bodies = [];
+        function b(x, y, z, vx, vy, vz) { bodies.push({ pos: [x, y, z], vel: [vx, vy, vz], mass: 1.0, radius: 0.2 }); }
+        if (name === 'ell') b(10, 0, 0, 0, 8, 0);
+        else if (name === 'two') { b(10, 0, 0, 0, 10, 0); b(-10, 0, 0, 0, -10, 0); }
+        else if (name === 'escape') b(10, 0, 0, 0, 15, 0);
+        else if (name === 'inc') b(10, 0, 0, 0, 10, 0.6);
+        else b(10, 0, 0, 0, 10, 0);         // near（含球约束时按 R=12 初始化）
+        return bodies;
+      }
+
+      var worlds = [], bodiesInit = [], names = [], trails = [], E0 = [], L0 = [];
+      var timer = null, tNow = 0, running = false;
+
+      function build() {
+        if (timer) { clearInterval(timer); timer = null; running = false; D.play.textContent = '▶ 播放'; }
+        var name = D.preset.value, sphereOn = D.sphere.checked, mode = D.mode.value;
+        worlds = []; names = []; bodiesInit = []; trails = []; E0 = []; L0 = []; tNow = 0;
+        var lawKeys = (mode === 'compare') ? MODES.slice() : [D.law.value];
+        for (var k = 0; k < lawKeys.length; k++) {
+          names.push(lawKeys[k]);
+          var bl = presetBodies(name);
+          if (sphereOn) bl = presetBodies('near');       // 球约束演示固定初态（R=12 匀速圆周）
+          bodiesInit.push(bl.map(function (x) { return x; }));
+          var w = new RW({
+            centralLaw: LAWS[lawKeys[k]],
+            mutual: D.mutual.checked, collide: D.collide.checked, rMin: 0.5,
+            constraint: sphereOn ? { type: 'sphere', R: 12 } : null   // 数学层·球面约束
+          });
+          for (var i = 0; i < bl.length; i++) {
+            var bb = bl[i];
+            var init = (sphereOn) ? [12, 0, 0, 0, 9.0, 0] : bb.pos.concat(bb.vel);
+            w.addBody([init[0], init[1], init[2]], [init[3], init[4], init[5]], bb.mass, bb.radius);
+          }
+          worlds.push(w); trails.push(w.bodies.map(function () { return []; }));
+        }
+        for (var j = 0; j < worlds.length; j++) {
+          E0.push(worlds[j].energy()); L0.push(norm(worlds[j].angularMomentum()));
+        }
+        window.__e0 = undefined;   // e_vec 基准随世界重建复位
+        legendSync(); render();
+      }
+
+      function norm(v) { return Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]); }
+
+      function legendSync() {
+        var single = D.mode.value !== 'compare';
+        var show = single ? [D.law.value] : MODES;
+        ['truth', 'exp', 'design'].forEach(function (k) {
+          $('lg' + (k === 'truth' ? 'Truth' : k === 'exp' ? 'Exp' : 'Design')).style.display =
+            (show.indexOf(k) >= 0) ? 'inline' : 'none';
+        });
+      }
+
+      function advance() {
+        var sub = 40 * parseInt(D.spd.value || '2', 10);
+        for (var k = 0; k < worlds.length; k++) {
+          var w = worlds[k], tr = trails[k];
+          for (var s = 0; s < sub; s++) {
+            try { w.step(DT); } catch (e) { return; }    // 奇点 fail-closed
+            if (s % 8 === 0) for (var i = 0; i < w.bodies.length; i++) {
+              tr[i].push(w.bodies[i].pos.slice());
+              if (tr[i].length > TRAIL) tr[i].shift();
+            }
+          }
+        }
+        tNow += sub * DT;
+        render();
+      }
+
+      var S = 30;
+      function px(cx, x, y) { return [cx + x * S, cvMid() - y * S]; }
+      var CVW = 640, CVH = 640;
+      function cvMid() { return CVH / 2; }
+
+      function render() {
+        var g = D.cv.getContext('2d'), W = CVW, H = CVH, cx = W / 2, cy = H / 2;
+        g.clearRect(0, 0, W, H);
+        g.fillStyle = '#0d1117'; g.fillRect(0, 0, W, H);
+        // 网格
+        g.strokeStyle = 'rgba(255,255,255,0.07)'; g.lineWidth = 1;
+        [5, 10, 15].forEach(function (rr) {
+          g.beginPath(); g.arc(cx, cy, rr * S, 0, 6.2832); g.stroke();
+        });
+        g.strokeStyle = 'rgba(255,255,255,0.10)';
+        g.beginPath(); g.moveTo(cx, 0); g.lineTo(cx, H); g.stroke();
+        g.beginPath(); g.moveTo(0, cy); g.lineTo(W, cy); g.stroke();
+        // 中心地球
+        g.fillStyle = '#e8c46a';
+        g.beginPath(); g.arc(cx, cy, 7, 0, 6.2832); g.fill();
+        g.fillStyle = '#a1823d'; g.font = '11px sans-serif'; g.textAlign = 'center';
+        g.fillText('地球(原点)', cx, cy + 22);
+        // 世界
+        for (var k = 0; k < worlds.length; k++) {
+          var col = names[k] === 'truth' ? COLOR.truth : names[k] === 'exp' ? COLOR.exp : COLOR.design;
+          var w = worlds[k], tr = trails[k];
+          for (var i = 0; i < w.bodies.length; i++) {
+            var p = w.bodies[i].pos;
+            g.strokeStyle = col; g.lineWidth = 1.4; g.beginPath();
+            var first = true;
+            for (var t = 0; t < tr[i].length; t++) {
+              var q = tr[i][t], sx = cx + q[0] * S, sy = cy - q[1] * S;
+              if (sx < -20 || sx > W + 20 || sy < -20 || sy > H + 20) { first = true; continue; }
+              if (first) { g.moveTo(sx, sy); first = false; } else g.lineTo(sx, sy);
+            }
+            g.stroke();
+            g.fillStyle = col;
+            g.beginPath(); g.arc(cx + p[0] * S, cy - p[1] * S, Math.max(4, 0.2 * S * 0.7), 0, 6.2832); g.fill();
+          }
+        }
+        // 侧视图 XZ
+        var gs = D.cvSide.getContext('2d'), Ws = D.cvSide.width, Hs = D.cvSide.height;
+        gs.fillStyle = '#0d1117'; gs.fillRect(0, 0, Ws, Hs);
+        gs.strokeStyle = 'rgba(255,255,255,0.10)';
+        gs.beginPath(); gs.moveTo(0, Hs / 2); gs.lineTo(Ws, Hs / 2); gs.stroke();
+        var hasZ = false;
+        for (var kk = 0; kk < worlds.length; kk++) {
+          var w2 = worlds[kk], tr2 = trails[kk], col2 = worlds.length > 1 ? COLOR[names[kk]] : COLOR[names[kk]] || '#e8e6e1';
+          for (var ii = 0; ii < w2.bodies.length; ii++) {
+            for (var tt = 0; tt < tr2[ii].length; tt++) if (Math.abs(tr2[ii][tt][2]) > 1e-9) hasZ = true;
+            var pp = w2.bodies[ii].pos;
+            gs.fillStyle = col2;
+            gs.beginPath(); gs.arc(Ws / 2 + pp[0] * S * 0.5, Hs / 2 - pp[2] * S * 0.5, 3.5, 0, 6.2832); gs.fill();
+          }
+        }
+        $('sideNote').textContent = hasZ ? '侧视图出现高度 → 轨道已出 XY 平面' : '轨道在 XY 平面内（z=0）';
+        readouts();
+      }
+
+      function readouts() {
+        var mode = D.mode.value, single = mode !== 'compare';
+        // 守恒表
+        var rows = '';
+        for (var k = 0; k < worlds.length; k++) {
+          var w = worlds[k], nm = names[k], E = w.energy(), L = norm(w.angularMomentum());
+          var dE = E0[k] ? Math.abs(E - E0[k]) / Math.abs(E0[k]) * 100 : 0;
+          var dL = L0[k] ? Math.abs(L - L0[k]) / L0[k] * 100 : 0;
+          var sep = '';
+          if (mode === 'compare' && nm !== 'truth') {
+            var wT = worlds[0], o = w.bodies[0].pos, oT = wT.bodies[0].pos;
+            sep = (norm([o[0] - oT[0], o[1] - oT[1], o[2] - oT[2]]) / (norm(oT) || 1) * 100).toFixed(3);
+          }
+          var label = { truth: '真实', exp: '经验(学出律)', design: '设计(硬写GM)' }[nm] || nm;
+          rows += '<tr><td>' + label + '</td><td class="num">' + dE.toExponential(3) + '</td><td class="num">' +
+            dL.toExponential(3) + '</td><td class="num">' + (sep === '' ? '—' : sep) + '</td></tr>';
+        }
+        $('consTable').getElementsByTagName('tbody')[0].innerHTML = rows;
+        $('consNote').textContent = single ? '单世界读数：能量/角动量漂移来自对称性守恒（诺特），数值应长期 ~1e-4% 量级。' :
+          '对比读数：经验/设计世界相对真实的"分离"随圈数增长；设计(红)应远大于经验(绿)。';
+        // 中心体读数（单世界用首个世界；对比用真实世界 = worlds[0]）
+        var w0 = worlds[0];
+        var r0 = 0;
+        for (var i = 0; i < w0.bodies.length; i++) {
+          var rr = norm(w0.bodies[i].pos); r0 = i === 0 ? rr : r0;
+        }
+        $('outR').textContent = r0 ? r0.toFixed(3) : '—';
+        $('outOrb').textContent = tNow.toFixed(2) + ' 时间单位';
+        // e_vec（仅单世界 + 纯设计律 + 非球约束有意义）
+        var ev = '—';
+        if (single && D.law.value === 'design' && !D.sphere.checked) {
+          try {
+            var b0 = w0.bodies[0], GM = 1000, r = norm(b0.pos), v2 = dot(b0.vel, b0.vel), rv = dot(b0.pos, b0.vel);
+            var evv = [((v2 - GM / r) * b0.pos[0] - rv * b0.vel[0]) / GM,
+              ((v2 - GM / r) * b0.pos[1] - rv * b0.vel[1]) / GM,
+              ((v2 - GM / r) * b0.pos[2] - rv * b0.vel[2]) / GM];
+            if (window.__e0 === undefined) { window.__e0 = norm(evv); ev = '—(第 1 帧定基准)'; }
+            else if (window.__e0 < 1e-9) { ev = 'e≈0（近圆，守恒退化）'; }
+            else ev = (Math.abs(norm(evv) - window.__e0) / window.__e0 * 100).toExponential(2) + '% 漂移';
+          } catch (e) { ev = '—'; }
+        }
+        $('outEvec').textContent = ev;
+        var sph = '—';
+        if (D.sphere.checked) {
+          var mx = 0;
+          for (var j = 0; j < w0.bodies.length; j++) mx = Math.max(mx, Math.abs(norm(w0.bodies[j].pos) - 12));
+          sph = mx.toExponential(2);
+        }
+        $('outSphere').textContent = sph;
+      }
+      function dot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+
+      D.play.addEventListener('click', function () {
+        if (running) { clearInterval(timer); timer = null; running = false; this.textContent = '▶ 播放'; }
+        else { timer = setInterval(advance, 90); running = true; this.textContent = '⏸ 暂停'; }
+      });
+      D.step.addEventListener('click', advance);
+      D.reset.addEventListener('click', build);
+      D.preset.addEventListener('change', build);
+      D.mode.addEventListener('change', build);
+      D.law.addEventListener('change', build);
+      D.mutual.addEventListener('change', build);
+      D.collide.addEventListener('change', build);
+      D.sphere.addEventListener('change', function () { build(); });
+      D.cons.addEventListener('change', function () { render(); });
+      D.spd.addEventListener('input', function () { D.spdVal.textContent = this.value; });
+
+      build();
+    })();
+  </script>
+</div>
+</body>
+</html>

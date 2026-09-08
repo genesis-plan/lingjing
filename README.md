@@ -84,7 +84,7 @@ node verify3d.js        # 三维验真（21³=9261，世界坐标 ±10，含坐�
 node verify_physics.js  # 多物理验真（四类场 PDE + 刚体）
 node verify_world.js     # 真实世界验真（原点=地球中心 · 中心引力 + N 体 + 数学规律，G1–G7）
 node verify_experience.js  # 经验驱动 E2E：学出的律当 RealWorld3D 的 centralLaw 跑（与 .py 逐项对照）
-# 或直接用浏览器打开 index.html / sim3d.html（sim3d.html 可切换三种物理规律）
+# 或直接用浏览器打开 index.html / sim3d.html / world3d.html（sim3d.html 可切换三种物理规律；world3d.html 看真实世界轨道 + 三律对比）
 ```
 
 ---
@@ -299,6 +299,7 @@ Python 版 `HeatWorld.init()` 立即施加 Dirichlet 边界；JS 版 `init()` �
 | `verify_experience.py` | Python 验真：经验驱动 E2E，与 JS 逐项对照（E1 系数误差 0.06%、E2 学回 1/r³ 修正 +600） |
 | `index.html` | 浏览器演示（2D）：真场 / 重建场 / 预演场三视图 + 五层状态 + 审计账本 |
 | `sim3d.html` | 浏览器演示（**三维世界坐标 + 多物理切换**）：原点 (0,0,0) 在正中心、XYZ 分正负；9 个 z 切片（−8…+8）× 真实场 / POD 重建 / 边界纯预测三行对照；下拉切换热传导 / 声波 / 流体输运 |
+| `world3d.html` | 浏览器演示（**真实世界轨道可视化**）：地球在原点、中心引力轨道（设计律/真实律/经验律三选或**三律同屏对比**）、物理层开关（互引力/碰撞）、数学层开关（球面约束/守恒读数/e_vec）、XY 俯视 + XZ 侧视、双星/逃逸/倾斜预设 |
 | `lingnao-decision.js` | 灵脑风格可审计决策核（哈希链 + FIREWALL + fail-closed） |
 | `lingshu-core.js` | 灵数求解器核心（源自 `genesis-plan/lingshu-solver`，同属版权方） |
 
