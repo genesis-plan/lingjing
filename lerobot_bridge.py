@@ -34,6 +34,7 @@
 """
 import sys
 import math
+import numpy as np
 
 # ---------- 3x3 线性代数（与 verify_dynamic / verify_sensor 同算法，保证同一平滑纪律） ----------
 def mm3(a, b):
@@ -150,6 +151,13 @@ def main():
         print('未找到 observation.state 列；可用列：', list(df.columns)[:20])
         sys.exit(1)
     state = df[col].to_numpy()
+    # LeRobot 的 observation.state 常为"每行一个向量"的 object 列（list/ndarray），
+    # to_numpy() 得形状 (N,) 的 object 数组；须统一转成 (N, D) 浮点，否则逐元素 float() 会
+    # 拿到整条向量而报错。2D 数值列则直接转 float。（此路径对真实 HF 录制同样生效）
+    if state.dtype == object or state.ndim == 1:
+        state = np.array([np.asarray(row, dtype=float) for row in state], dtype=float)
+    else:
+        state = np.asarray(state, dtype=float)
     if state.ndim == 1:
         state = state.reshape(-1, 1)
     N, D = state.shape

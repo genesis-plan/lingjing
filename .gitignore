@@ -27,6 +27,9 @@ _diag*.js
 _*.log
 *.log
 
+# 合成自测数据（非真实机器人录制，不入库；真实数据按政策不保留）
+synthetic_lerobot.parquet
+
 # 编辑器与系统
 .vscode/
 .idea/
