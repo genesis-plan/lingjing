@@ -59,7 +59,8 @@ def learn_law(pos, vel, dt):
     （奥卡姆/"数学先验"）反复把小系数归零再重拟合，只留真正显著的项。
     """
     N = len(pos)
-    a_est = np.zeros((N, 2))
+    dim = vel.shape[1]                     # 维度无关：2D 或 3D 轨道都能学
+    a_est = np.zeros((N, dim))
     for t in range(1, N - 1):
         a_est[t] = (vel[t + 1] - vel[t - 1]) / (2 * dt)   # 中心差分
     a_est[0] = a_est[1]

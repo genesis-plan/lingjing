@@ -631,8 +631,10 @@
   // ==================== 真实世界（原点=地球中心 · 中心引力 + 多体 + 数学规律） ====================
   /**
    * RealWorld3D：把"三维虚拟空间"升级为更接近真实世界的系统。
-   *   - 物理层（现实规律，含运动）：以原点模拟为地球中心，从原点产生反平方中心引力
-   *       F = −G·M·m·r̂ / r²；可选物体间互引力（N 体）；可选弹性碰撞（现实规律的相互作用）。
+   *   - 物理层（现实规律，含运动）：以原点模拟为地球中心，默认产生反平方中心引力
+   *       F = −G·M·m·r̂ / r²；可选物体间互引力（N 体）；可选弹性碰撞。
+   *       ◆ 可给 centralLaw=[c0,c1,c2,c3]（候选基 [1/r²,1/r,1,1/r³] 上的系数）替换默认律——
+   *         用"机器人学出的经验律"跑世界（如 SINDy 从真实轨迹学回；见 verify_experience.js）。
    *   - 数学层（数学规律，区别于物理力）：
    *       ◇ MG 几何约束律：物体被约束在给定半径的球面上（纯数学结构，非力，每步投影）。
    *       ◇ MI 不变量律：三大连续对称对应的守恒量——能量(时间平移)、角动量(SO(3)旋转)、
@@ -646,6 +648,7 @@
       const o = opts || {};
       this.G = o.G != null ? o.G : 1.0;            // 引力常数
       this.M = o.M != null ? o.M : 1000.0;          // 原点处中心质量（地球）
+      this.centralLaw = o.centralLaw || null;       // null | [c0,c1,c2,c3] 学出的经验律（基 [1/r²,1/r,1,1/r³]）
       this.rMin = o.rMin != null ? o.rMin : 0.5;    // 奇点护栏：距原点过近直接拒
       this.mutual = !!o.mutual;                     // 是否启用物体间互引力
       this.collide = o.collide != null ? o.collide : false;  // 弹性碰撞
@@ -658,13 +661,21 @@
       return this;
     }
     _accel() {
-      const bs = this.bodies, n = bs.length, GM = this.G * this.M;
+      const bs = this.bodies, n = bs.length, GM = this.G * this.M, law = this.centralLaw;
       const A = bs.map(function () { return [0, 0, 0]; });
       for (let i = 0; i < n; i++) {
         const r = bs[i].pos;
         const rr = Math.hypot(r[0], r[1], r[2]);
         if (rr < this.rMin) throw new Error('中心引力奇点：物体#' + i + ' 距原点 ' + rr.toExponential(2) + ' < rMin=' + this.rMin + '（fail-closed）');
-        const f = -GM / (rr * rr * rr);
+        let aMag;
+        const irr = 1 / rr;
+        if (law) {
+          const irr2 = irr * irr;                 // 经验律：a_mag(r) = Σ cᵢ·bᵢ(r)
+          aMag = law[0] * irr2 + law[1] * irr + law[2] + law[3] * irr2 * irr;
+        } else {
+          aMag = -GM * irr * irr;                 // 默认硬写：−GM/r²
+        }
+        const f = aMag / rr;                      // accel = a_mag·r̂ = (a_mag/rr)·r
         A[i][0] += f * r[0]; A[i][1] += f * r[1]; A[i][2] += f * r[2];
         if (this.mutual) {
           for (let j = 0; j < n; j++) {
@@ -719,11 +730,14 @@
       }
     }
     energy() {
-      let E = 0; const GM = this.G * this.M, bs = this.bodies;
+      let E = 0; const GM = this.G * this.M, bs = this.bodies, law = this.centralLaw;
       for (let i = 0; i < bs.length; i++) {
         const b = bs[i], v2 = b.vel[0] ** 2 + b.vel[1] ** 2 + b.vel[2] ** 2;
         const r = Math.hypot(b.pos[0], b.pos[1], b.pos[2]);
-        E += 0.5 * b.mass * v2 - GM * b.mass / r;
+        let V;                                        // 中心势（单位质量）：a_mag=−dV/dr
+        if (law) V = law[0] / r + law[1] * Math.log(r) - law[2] * r + law[3] / (2 * r * r);
+        else V = -GM / r;
+        E += 0.5 * b.mass * v2 + b.mass * V;
         if (this.mutual) for (let j = 0; j < i; j++) {
           const d = Math.hypot(b.pos[0] - bs[j].pos[0], b.pos[1] - bs[j].pos[1], b.pos[2] - bs[j].pos[2]);
           E += -this.G * b.mass * bs[j].mass / d;
@@ -1086,7 +1100,7 @@
   }
 
   return {
-    jacobiEigen, gaussSolve,
+    jacobiEigen, gaussSolve, lstsq,
     HeatWorld, HeatWorld3D, WaveWorld3D, PoissonWorld3D, AdvectDiffuseWorld3D, RigidBody3D, Grid3D, RealWorld3D,
     HoloMap, fitLinear, fitAffine, fitAffine2, predict, predictAffine, predictAffine2,
   };

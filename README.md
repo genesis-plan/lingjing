@@ -63,6 +63,7 @@ python verify_physics.py  # 多物理验真（四类场 PDE + 刚体，与 JS �
 python verify_world.py    # 真实世界验真（原点=地球中心 · 中心引力 + 多体 + 数学规律）
 python induce_law.py     # 从轨迹反推力律（SINDy 系统辨识，证明物理层可从数据学习）
 python adapt_loop.py     # 自适应闭环 v2：观察→学律(区间)→映射→改律→不动区间；学出的律=经验，跨交互持久、遇新数据更新
+python verify_experience.py  # 经验驱动 E2E：学出的律当 RealWorld3D 的 central_law 跑（贴合真世界 / 硬写律偏离）
 ```
 
 可选接入真灵数求解器（lingshu-solver，JS 实现，经子进程调用）：
@@ -81,6 +82,8 @@ python verify.py
 node verify.js          # 命令行验真（2D）
 node verify3d.js        # 三维验真（21³=9261，世界坐标 ±10，含坐标系自检 11 项）
 node verify_physics.js  # 多物理验真（四类场 PDE + 刚体）
+node verify_world.js     # 真实世界验真（原点=地球中心 · 中心引力 + N 体 + 数学规律，G1–G7）
+node verify_experience.js  # 经验驱动 E2E：学出的律当 RealWorld3D 的 centralLaw 跑（与 .py 逐项对照）
 # 或直接用浏览器打开 index.html / sim3d.html（sim3d.html 可切换三种物理规律）
 ```
 
@@ -219,6 +222,8 @@ Python 的 `np.linalg.lstsq`（SVD）直接解原方程、不平方条件数，�
 
 **闭环还能自适应（不动区间 + 经验，v2）**：见 `adapt_loop.py`——观察真实轨迹→学律（得统计区间）→写入虚拟世界→验"虚拟律=真实律"→不等则改律→重复。学到的律不是"不动点"而是**不动区间**（模型空间的不变集 B，满足 F(B)⊆B，区间有宽度=承认的不确定度）；学出的律成为机器人自己的**经验**（持久信念 μ±δ），跨交互保存、作为下次先验热启动，新数据来才融合更新（冲突则放大 δ=诚实承认"我可能错了"）。真实平稳 → 收敛到不动区间、经验稳定；真实非平稳 → 无不变集，持有区间随真实漂移、持续跟踪+告警；复遇相同世界 → 经验命中(iter0 即不动区间)；遇不同世界 → 冲突触发经验修正。
 
+**学出的经验直接驱动物理层**：见 `verify_experience.js/.py`——`RealWorld3D` 新增 `centralLaw/central_law=[c0..c3]`（候选基 `[1/r²,1/r,1,1/r³]` 上的系数），把学出的 μ 直接当世界的力律跑轨道（默认不传仍走硬写 −GM/r²）。E1 纯反平方：μ 系数误差 0.063%（1/r³ 与 1/r² 在本弧段的**基可辨识性下限**），虚拟轨道 1 圈贴合 0.16%、15 圈相位累积到 2.5%；E2 真实含设计外 1/r³ 修正：学出的 μ 把 +600 修正项学回（≈+603），虚拟轨道 15 圈 max 分离 1.2%，而硬写 GM=1000 的"设计世界"漏掉修正、15 圈偏离 268%（约 210×）。诚实教训：**虚拟世界只在信任时域内贴合，微小律误差经长程相位累积放大** ⇒ 经验必须持续被真实数据校正——这正是 v2 闭环存在的原因。
+
 ---
 
 ## 五、诚实边界（请务必读）
@@ -290,6 +295,8 @@ Python 版 `HeatWorld.init()` 立即施加 Dirichlet 边界；JS 版 `init()` �
 | `verify_world.py` | Python 验真：真实世界，与 JS 逐项对照 |
 | `induce_law.py` | Python 演示：从轨迹用 SINDy(STLSQ) 稀疏回归反推中心力律，证明物理层可从数据学习（受候选基=数学先验约束） |
 | `adapt_loop.py` | Python 演示：自适应闭环 v2（观察→学律得统计区间→映射→改律），收敛到不动区间；学出的律=机器人经验，跨交互持久、热启动命中、遇新数据融合修正 |
+| `verify_experience.js` | Node 验真：经验驱动 E2E——学出的经验律当 `RealWorld3D.centralLaw` 跑轨道，与真实世界逐圈对照（贴合/相位累积/设计律偏离） |
+| `verify_experience.py` | Python 验真：经验驱动 E2E，与 JS 逐项对照（E1 系数误差 0.06%、E2 学回 1/r³ 修正 +600） |
 | `index.html` | 浏览器演示（2D）：真场 / 重建场 / 预演场三视图 + 五层状态 + 审计账本 |
 | `sim3d.html` | 浏览器演示（**三维世界坐标 + 多物理切换**）：原点 (0,0,0) 在正中心、XYZ 分正负；9 个 z 切片（−8…+8）× 真实场 / POD 重建 / 边界纯预测三行对照；下拉切换热传导 / 声波 / 流体输运 |
 | `lingnao-decision.js` | 灵脑风格可审计决策核（哈希链 + FIREWALL + fail-closed） |

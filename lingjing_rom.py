@@ -610,7 +610,9 @@ class RealWorld3D:
     真实世界（原点=地球中心 · 中心引力 + 多体 + 数学规律）。
 
     物理层（现实规律，含运动）：
-        - 以原点模拟为地球中心，从原点产生反平方中心引力 F = −G·M·m·r̂ / r²；
+        - 以原点模拟为地球中心，默认从原点产生反平方中心引力 F = −G·M·m·r̂ / r²；
+        - 可传 central_law=[c0,c1,c2,c3]（候选基 [1/r²,1/r,1,1/r³] 上的系数）替换默认律——
+          用"机器人学出的经验律"跑世界（SINDy 从真实轨迹学回；见 verify_experience.py）；
         - 可选物体间互引力（N 体）；可选弹性碰撞（现实规律的相互作用）。
     数学层（数学规律，区别于物理力）：
         - MG 几何约束律：物体被约束在给定半径的球面上（纯数学结构，非力，每步投影）；
@@ -624,13 +626,16 @@ class RealWorld3D:
     """
 
     def __init__(self, G: float = 1.0, M: float = 1000.0, r_min: float = 0.5,
-                 mutual: bool = False, collide: bool = False, constraint=None):
+                 mutual: bool = False, collide: bool = False, constraint=None,
+                 central_law=None):
         self.G = float(G)
         self.M = float(M)
         self.r_min = float(r_min)
         self.mutual = bool(mutual)
         self.collide = bool(collide)
         self.constraint = constraint  # None | {"type":"sphere","R":float}
+        self.central_law = (None if central_law is None
+                            else np.array(central_law, dtype=np.float64))
         self.bodies: List[Dict] = []
         self.time = 0.0
 
@@ -647,6 +652,7 @@ class RealWorld3D:
         bs = self.bodies
         n = len(bs)
         GM = self.G * self.M
+        law = self.central_law
         A = [np.zeros(3) for _ in range(n)]
         for i in range(n):
             r = bs[i]["pos"]
@@ -654,8 +660,12 @@ class RealWorld3D:
             if rr < self.r_min:
                 raise RuntimeError(
                     f"中心引力奇点：物体#{i} 距原点 {rr:.2e} < r_min={self.r_min}（fail-closed）")
-            f = -GM / (rr ** 3)
-            A[i] = f * r
+            if law is not None:
+                irr = 1.0 / rr
+                a_mag = law[0] * irr * irr + law[1] * irr + law[2] + law[3] * irr * irr * irr
+            else:
+                a_mag = -GM / (rr * rr)          # 默认硬写：−GM/r²
+            A[i] = (a_mag / rr) * r              # accel = a_mag·r̂ = (a_mag/rr)·r
             if self.mutual:
                 for j in range(n):
                     if j == i:
@@ -715,11 +725,16 @@ class RealWorld3D:
         E = 0.0
         GM = self.G * self.M
         bs = self.bodies
+        law = self.central_law
         for i in range(len(bs)):
             b = bs[i]
             v2 = float(b["vel"] @ b["vel"])
             r = float(np.linalg.norm(b["pos"]))
-            E += 0.5 * b["mass"] * v2 - GM * b["mass"] / r
+            if law is not None:
+                V = law[0] / r + law[1] * np.log(r) - law[2] * r + law[3] / (2 * r * r)
+            else:
+                V = -GM / r
+            E += 0.5 * b["mass"] * v2 + b["mass"] * V
             if self.mutual:
                 for j in range(i):
                     d = float(np.linalg.norm(b["pos"] - bs[j]["pos"]))
