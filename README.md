@@ -24,10 +24,10 @@
 
 | 层 | 名称 | 数学对象 | 本仓库实现 |
 | :--- | :--- | :--- | :--- |
-| 1 | 物理底座 | \(\mathcal{M}_{3,1} + \mathcal{E}_{\text{PDE}}\) | `rom.js` / `lingjing_rom.py` — 二维 **与三维**热传导 PDE |
-| 2 | 体空间状态 | \(\phi(t,\mathbf{x})\) | `HeatWorld`（2D FTCS） / `HeatWorld3D`（3D 七点 FTCS） |
+| 1 | 物理底座 | \(\mathcal{M}_{3,1} + \mathcal{E}_{\text{PDE}}\) | `rom.js` / `lingjing_rom.py` — 二维热传导 + 三维**四类场 PDE**（热传导 / 声波 / 静电势 / 流体输运） |
+| 2 | 体空间状态 | \(\phi(t,\mathbf{x})\) | `Grid3D` 基类 + `HeatWorld3D` / `WaveWorld3D` / `PoissonWorld3D` / `AdvectDiffuseWorld3D` + `RigidBody3D`（非场物体） |
 | 3 | 全息映射 | \(\Phi_{\text{Holo}}: \phi \mapsto \psi\) | `HoloMap.build()` — POD/SVD 降阶 |
-| 4 | 边界智能层 | \(\mathcal{I}(\psi) \mapsto \psi'\) | `fit_linear()` / `fit_affine()` + `predict()` / `predict_affine()` + 灵脑决策核 |
+| 4 | 边界智能层 | \(\mathcal{I}(\psi) \mapsto \psi'\) | `fit_linear()` / `fit_affine()` / **`fit_affine2()`（AR(2)）** + `predict()` / `predict_affine()` / `predict_affine2()` + 灵脑决策核 |
 | 5 | 反向映射 | \(\Phi_{\text{Holo}}^{-1}: \psi' \mapsto \phi'\) | `HoloMap.reconstruct()` |
 
 **闭环**：感知 → 体状态更新 → 全息投影 → 边界推理 → 反向映射 → 行动 → 反馈。
@@ -59,6 +59,7 @@
 pip install numpy
 python verify.py        # 2D 五层验真
 python verify3d.py      # 三维验真（与 JS 轨逐项对照）
+python verify_physics.py  # 多物理验真（四类场 PDE + 刚体，与 JS 轨逐项对照）
 ```
 
 可选接入真灵数求解器（lingshu-solver，JS 实现，经子进程调用）：
@@ -76,7 +77,8 @@ python verify.py
 ```bash
 node verify.js          # 命令行验真（2D）
 node verify3d.js        # 三维验真（21³=9261，世界坐标 ±10，含坐标系自检 11 项）
-# 或直接用浏览器打开 index.html
+node verify_physics.js  # 多物理验真（四类场 PDE + 刚体）
+# 或直接用浏览器打开 index.html / sim3d.html（sim3d.html 可切换三种物理规律）
 ```
 
 ---
@@ -156,16 +158,46 @@ Gram 矩阵非对角元高达 **0.876**（模态 4 与模态 7 几乎平行）�
 副作用是**请求 r=8 实际可能只得到 7 个模态**——这是诚实的：剩下的维度没有信息量。
 加完之后 JS / Python 两轨的逐级重建误差**逐位一致到小数点后 6 位**。
 
+### 多物理规律（同一张三维世界，四类场 PDE + 刚体）
+
+`verify_physics.js` / `verify_physics.py` 在同一个 21³ 世界（唯一原点居中、XYZ 正负半轴）上
+跑五类物理，每类都问同一个问题：**守不守恒 / 准不准 / 能不能被降阶**。双轨逐项一致：
+
+| 物理 | 类型 | 关键验真结论 |
+| :--- | :--- | :--- |
+| A 热传导 | 抛物型 \(\partial_t\phi=\alpha\nabla^2\phi\) | 总热量单调不增（耗散）；有效秩 3；L4 仿射样本外 1.4e-5 |
+| B 声波 | 双曲型 \(\partial^2_t u=c^2\nabla^2 u\) | 能量 30 步漂移 2.7e-12%；波速 1/c=0.87；一阶仿射爆 7532%，AR(2) 降到 8.65e-3（=L5 底线） |
+| C 静电势 | 椭圆型 \(\nabla^2\phi=-\rho/\varepsilon_0\) | 叠加原理 1.1e-16；离散均值性质精确成立；无时间演化，降阶须参数化建基（未实现） |
+| D 流体输运 | 对流–扩散 \(\partial_t\phi+u\cdot\nabla\phi=\alpha\nabla^2\phi\) | 转 90° 质心角 89.86°；峰值衰减 33% 是迎风的数值扩散（非物理耗散）；有效秩 5 > 热传导 |
+| E 刚体 | 牛顿–欧拉（非场） | 自由落体 1.1e-14；动量逐位守恒；无力矩自转 \(\|L\|\) 漂移 1.5e-4%（RK2） |
+| F CFL 护栏 | 稳定性 fail-closed | 4/4 超限场景直接拒绝启动 |
+
+**核心教训：L4 的模型阶必须匹配系统阶。** 热传导 / 对流是一阶系统，用仿射 \(\psi_{t+1}=A\psi_t+b\)；
+波动方程是二阶系统，用 AR(2) \(\psi_{t+1}=A\psi_t+B\psi_{t-1}+c\)。用错阶不是精度问题，是**模型类错配**——
+一阶仿射套声波，6 步样本外误差 **7.5e+1（7532%）**，改 AR(2) 后 **8.65e-3**，恰好落在 L5 投影底线（理论上最优）。
+
+### 修掉的另一个真 bug：法方程会把条件数平方
+
+声波 AR(2) 一开始两轨对不上：JS 报 1.346（134%），Python 报 8.65e-3。根因是 JS 的
+`fitAffine2` 走**法方程**（先算 \(X^\top X\) 再高斯消元），把条件数**平方**——声波设计矩阵里
+相邻快照近乎共线，\(X^\top X\) 病态到高斯消元（即便部分主元）都救不回来，6 步预测后误差爆成 134%。
+Python 的 `np.linalg.lstsq`（SVD）直接解原方程、不平方条件数，得 8.65e-3（恰等于 L5 底线，物理正确）。
+
+修法：JS 新增 `lstsq()`——**Householder QR** 直接解最小二乘（与 SVD 同为向后稳定算法），
+`fitLinear` / `fitAffine` / `fitAffine2` 全部改走它。修后两轨声波 AR(2) 逐位一致（8.650e-3），
+热传导 / 对流等其他数字不变。
+
 ---
 
 ## 五、诚实边界（请务必读）
 
 这些是**真实的局限**，不是免责声明：
 
-1. **MVP 仅启用热传导一个 PDE**。刚体 / 弹性 / 流体 / 声学 / 电磁是框架预置模型，尚未实现。
-2. **三维已启用，但仍是"一个 PDE 的三维"，不是完整的 \(\mathcal{M}_{3,1}\)**。
-   三维热传导（21³=9261 自由度，世界坐标 ±10）已实装并双轨验真（`HeatWorld3D` + `verify3d.*`），
-   但只有各向同性常系数热传导一种物理；刚体 / 弹性 / 流体 / 声学 / 电磁仍是框架预置、未实现，
+1. **已实现四类场 PDE + 刚体，但还不是全部物理**。热传导 / 声波 / 静电势 / 流体输运 + 刚体牛顿–欧拉
+   已实装并双轨验真（`verify_physics.js` / `verify_physics.py`）；弹性 / 电磁仍是框架预置、未实现。
+2. **多物理是"各自独立的单物理世界"，不是耦合的完整 \(\mathcal{M}_{3,1}\)**。
+   四类场 PDE 都继承同一个 `Grid3D` 世界底座（唯一原点、XYZ 正负半轴、七点拉普拉斯），
+   但彼此之间没有耦合（例如热传导不感知流体的对流、声波不感知静电场），
    也没有自适应网格、没有复杂几何边界（目前只有 Dirichlet 零边界）。
 3. **ROM 是近似，重建有误差**。分布外状态误差在 2D 场景约 **~50%**、三维场景约 **~90%**——
    这是降阶模型的真实泛化局限，不是 bug（三维热点位移后，8 个基向量几乎无法表示新位置）。
@@ -182,8 +214,12 @@ Gram 矩阵非对角元高达 **0.876**（模态 4 与模态 7 几乎平行）�
    POD 投影 \(\psi = \Phi^\top(\phi-\bar\phi)\) 因减均值引入常数项，真实关系是 \(\psi_{t+1}=A\psi_t+b\)。
    三维验真实测：只拟合 \(A\) 时 6 步预测误差 **7.87e-1（≈79%）**，加入偏置 \(b\) 后降到 **3.5e-9**。
    这不是调参问题，是模型错配——`fitAffine()` / `fit_affine()` 才是正确用法。
-8. **三维当前用的是显式 FTCS，受 CFL 硬约束** \(\alpha\Delta t/\Delta x^2 \le 1/6\)。
-   想加大时间步就必须换隐式格式（尚未实现），否则内核会**直接拒绝启动**并抛错（fail-closed）。
+8. **显式格式受 CFL 硬约束（各物理不同）**：热传导 \(\alpha\Delta t/\Delta x^2\le1/6\)、
+   声波 Courant \(c\Delta t/\Delta x\le1/\sqrt3\)、流体对流 \(\sum|u_i|\Delta t/\Delta x\le1\)。
+   超限内核**直接拒绝启动**并抛错（fail-closed），想加大时间步必须换隐式格式（尚未实现）。
+9. **边界模型还要匹配系统的阶**。一阶系统（热传导 / 对流）用仿射；二阶系统（波动方程）必须用 AR(2)
+   \(\psi_{t+1}=A\psi_t+B\psi_{t-1}+c\)（`fitAffine2()` / `fit_affine2()`）。
+   用一阶仿射套二阶声波，6 步样本外误差爆到 **7.5e+1（7532%）**，改 AR(2) 后降到 **8.65e-3**。
 
 ### 三个方法学陷阱（本仓库亲自踩过，全部修掉并留在注释里）
 
@@ -210,14 +246,16 @@ Python 版 `HeatWorld.init()` 立即施加 Dirichlet 边界；JS 版 `init()` �
 
 | 文件 | 说明 |
 | :--- | :--- |
-| `lingjing_rom.py` | 五层核心数学（Python / NumPy 版，唯一第三方依赖 numpy） |
+| `lingjing_rom.py` | 五层核心数学（Python / NumPy 版，唯一第三方依赖 numpy）；含 `Grid3D` + 四类场 PDE + `RigidBody3D` + `fit_affine2` |
 | `verify.py` | Python 验真：五层 + 篡改检测 + 规模扩展 |
-| `rom.js` | 五层核心数学（JS 版，UMD）；含 `HeatWorld3D` / `fitAffine` / `predictAffine` |
+| `rom.js` | 五层核心数学（JS 版，UMD）；含四类场 PDE + `fitAffine` / `fitAffine2` / `lstsq`（Householder QR 稳定最小二乘） |
 | `verify.js` | Node 验真（2D） |
 | `verify3d.js` | Node 验真（三维世界坐标，21³=9261，含坐标系自检 11 项） |
 | `verify3d.py` | Python 验真（三维，与 JS 逐项对照） |
+| `verify_physics.js` | Node 验真：四类场 PDE + 刚体（五类物理 A–E + CFL 护栏 F） |
+| `verify_physics.py` | Python 验真：多物理，与 JS 逐项对照 |
 | `index.html` | 浏览器演示（2D）：真场 / 重建场 / 预演场三视图 + 五层状态 + 审计账本 |
-| `sim3d.html` | 浏览器演示（**三维世界坐标**）：原点 (0,0,0) 在正中心、XYZ 分正负；9 个 z 切片（−8…+8）× 真实场 / POD 重建 / 边界纯预测三行对照，热点位置用物理坐标给 |
+| `sim3d.html` | 浏览器演示（**三维世界坐标 + 多物理切换**）：原点 (0,0,0) 在正中心、XYZ 分正负；9 个 z 切片（−8…+8）× 真实场 / POD 重建 / 边界纯预测三行对照；下拉切换热传导 / 声波 / 流体输运 |
 | `lingnao-decision.js` | 灵脑风格可审计决策核（哈希链 + FIREWALL + fail-closed） |
 | `lingshu-core.js` | 灵数求解器核心（源自 `genesis-plan/lingshu-solver`，同属版权方） |
 
@@ -237,8 +275,9 @@ Python 版 `HeatWorld.init()` 立即施加 Dirichlet 边界；JS 版 `init()` �
 ## 八、路线（待版权方拍板）
 
 - [x] 扩展到三维 \(\mathcal{M}_{3,1}\)——**已落**：`HeatWorld3D` 双轨 + `verify3d.*` 验真（21³=9261，世界坐标系原点居中、XYZ 分正负）
-- [ ] 三维可视化（浏览器切片/等值面渲染，目前只有 `sliceZ()` 数值接口）
-- [ ] 三维场景的第二个 PDE（弹性 / 流体），验证框架通用性
-- [ ] 接入第二个 PDE 模型（弹性 / 流体），验证框架通用性
+- [x] 三维可视化——**已落**：`sim3d.html`（9 个 z 切片三行对照，世界坐标轴图示）
+- [x] 接入多种物理规律——**已落**：四类场 PDE（热传导 / 声波 / 静电势 / 流体输运）+ 刚体，`verify_physics.*` 双轨验真
+- [ ] 多物理之间的耦合（多场耦合，如热对流、磁流体）
+- [ ] 弹性 / 电磁 PDE
 - [ ] 接入完整灵脑内核（八元组、M1–M4 证明模块、SHA-256+HMAC 单写者账本）
 - [ ] 打包为可分发的 `lingjing-rom`（PyPI / npm）

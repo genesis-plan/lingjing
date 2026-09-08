@@ -82,6 +82,52 @@
     return M.map((r, i) => r[n] / r[i === 0 ? 0 : i]);
   }
 
+  /**
+   * 稳定最小二乘：求 x 使 ‖X·x − y‖ 最小（X: m×n, m≥n）。
+   *
+   * ⚠️ 为什么不能用法方程（XᵀX 再高斯消元）：
+   *   法方程把条件数【平方】。X 病态时（例如声波 AR(2) 的设计矩阵里相邻快照近乎
+   *   共线），XᵀX 的病态被放大到高斯消元连部分主元都救不回来——实测声波场景
+   *   6 步样本外预测误差爆到 **1.346（134%）**，而 Python 轨 np.linalg.lstsq（SVD，
+   *   直接解 X 不平方条件数）得 **8.65e-3（0.865%）**，恰好等于 L5 投影底线。
+   *
+   *   本函数用 Householder QR 直接解原方程（与 SVD 同为向后稳定算法），
+   *   满秩时与 np.linalg.lstsq 数字对齐到 ~1e-12。
+   */
+  function lstsq(X, y) {
+    const m = X.length, n = X[0].length;
+    const A = new Array(m);
+    for (let i = 0; i < m; i++) A[i] = X[i].concat([y[i]]);   // 增广 [X | y]
+    for (let k = 0; k < n; k++) {
+      let alpha = 0;
+      for (let i = k; i < m; i++) alpha += A[i][k] * A[i][k];
+      alpha = Math.sqrt(alpha);
+      if (alpha < 1e-300) continue;                            // 该列已零
+      const a0 = A[k][k];
+      const sigma = a0 >= 0 ? -alpha : alpha;
+      const v = new Array(m - k);                              // Householder 向量
+      v[0] = a0 - sigma;
+      for (let i = k + 1; i < m; i++) v[i - k] = A[i][k];
+      const vnorm2 = v[0] * v[0] + (alpha * alpha - a0 * a0);
+      const beta = 2 / vnorm2;
+      for (let j = k; j <= n; j++) {                           // H = I − β v vᵀ 作用到第 k..n 列
+        let dot = v[0] * A[k][j];
+        for (let i = k + 1; i < m; i++) dot += v[i - k] * A[i][j];
+        const s = beta * dot;
+        A[k][j] -= s * v[0];
+        for (let i = k + 1; i < m; i++) A[i][j] -= s * v[i - k];
+      }
+    }
+    const x = new Array(n).fill(0);                            // 回代 R x = d
+    for (let i = n - 1; i >= 0; i--) {
+      if (Math.abs(A[i][i]) < 1e-14) { x[i] = 0; continue; }
+      let s = A[i][n];
+      for (let j = i + 1; j < n; j++) s -= A[i][j] * x[j];
+      x[i] = s / A[i][i];
+    }
+    return x;
+  }
+
   // ==================== L1+L2：物理底座 + 体空间状态 ====================
 
   /**
@@ -134,27 +180,18 @@
   }
 
   /**
-   * 三维热传导：∂tφ = α∇²φ + s
-   * 显式 FTCS 七点格式；稳定条件 α·dt/dx² ≤ 1/6（3D，比 2D 的 1/4 更严）。
-   * 展平序 idx(i,j,k) = (k*ny + j)*nx + i，与 NumPy (nz,ny,nx) 的 C 序一致。
+   * Grid3D：三维世界的【公共底座】——网格 + 世界坐标系 + 边界 + 七点拉普拉斯。
+   * 所有物理世界（热传导 / 声波 / 静电势 / 流体输运）都继承它，
+   * 这样"唯一原点居中、XYZ 有正负半轴"这套坐标系只有一份实现，不会各写各的。
    *
-   * 与 2D 版的一处【刻意不同】：2D 版 JS 的 init() 不施加边界、要等第一次 step()，
-   * 而 Python 版 init() 立即施加，导致交叉验证初始 mean 差 1e-4（README §5 已记）。
-   * 3D 版两轨统一在 init() 就施加边界——初值本应满足边界条件，这是更正确的做法，
-   * 故 3D 的 JS/Python 交叉验证从 t=0 起即逐位可比。
+   * 展平序 idx(i,j,k) = (k*ny + j)*nx + i，与 NumPy (nz,ny,nx) 的 C 序一致。
    */
-  class HeatWorld3D {
+  class Grid3D {
     constructor(nx, ny, nz, opts) {
       const o = opts || {};
       this.nx = nx; this.ny = ny; this.nz = nz; this.N = nx * ny * nz;
-      this.alpha = o.alpha != null ? o.alpha : 0.2;
-      this.dt = o.dt != null ? o.dt : 0.5;
       this.dx = o.dx != null ? o.dx : 1;
       this.boundary = o.boundary != null ? o.boundary : 0;
-      this.lam = this.alpha * this.dt / (this.dx * this.dx);
-      if (this.lam > 1 / 6) {
-        throw new Error('CFL 不稳定：α·dt/dx² = ' + this.lam.toFixed(4) + ' > 1/6（3D 显式 FTCS 上限）。请调小 dt 或 alpha。');
-      }
       this.field = new Float64Array(this.N);
       this.sources = new Float64Array(this.N);
       this._buf = new Float64Array(this.N);
@@ -214,8 +251,9 @@
       if (p >= 0) this.sources[p] = v;
     }
     clearSources() { this.sources.fill(0); }
-    _applyBoundary() {
-      const { nx, ny, nz, boundary } = this, f = this.field;
+    /** 六面 Dirichlet 边界。arr 省略时作用于主场；对蛙跳的 prev 层也必须施加 */
+    _applyBoundary(arr) {
+      const { nx, ny, nz, boundary } = this, f = arr || this.field;
       for (let k = 0; k < nz; k++) for (let j = 0; j < ny; j++) {
         f[this.idx(0, j, k)] = boundary; f[this.idx(nx - 1, j, k)] = boundary;
       }
@@ -224,6 +262,50 @@
       }
       for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
         f[this.idx(i, j, 0)] = boundary; f[this.idx(i, j, nz - 1)] = boundary;
+      }
+    }
+    /** 内部格点是否为边界格（边界格不参与演化） */
+    isBoundary(i, j, k) {
+      return i === 0 || j === 0 || k === 0 || i === this.nx - 1 || j === this.ny - 1 || k === this.nz - 1;
+    }
+    /**
+     * 七点拉普拉斯的邻点和（不含中心项）。
+     * 返回 s = Σ(六邻) ，调用方自行算 s - 6·c。
+     */
+    _neighborSum(field, p, i, j, k) {
+      const sy = this.nx, sz = this.nx * this.ny;
+      return field[p - 1] + field[p + 1] + field[p - sy] + field[p + sy] + field[p - sz] + field[p + sz];
+    }
+    stats() {
+      let mx = -Infinity, mn = Infinity, sum = 0;
+      for (let k = 0; k < this.N; k++) { const v = this.field[k]; if (v > mx) mx = v; if (v < mn) mn = v; sum += v; }
+      return { max: mx, min: mn, mean: sum / this.N };
+    }
+    /** 取 z=k 的切片（返回 nx*ny 的 Float64Array，行序 j） */
+    sliceZ(k) { return this.field.subarray(k * this.ny * this.nx, (k + 1) * this.ny * this.nx); }
+    /** 按【物理坐标】取 z 平面切片（取最近的一层） */
+    sliceAtZ(z) { return this.sliceZ(this.kOf(z)); }
+    flat() { return this.field; }
+  }
+
+  /**
+   * 三维热传导：∂tφ = α∇²φ + s
+   * 显式 FTCS 七点格式；稳定条件 α·dt/dx² ≤ 1/6（3D，比 2D 的 1/4 更严）。
+   *
+   * 与 2D 版的一处【刻意不同】：2D 版 JS 的 init() 不施加边界、要等第一次 step()，
+   * 而 Python 版 init() 立即施加，导致交叉验证初始 mean 差 1e-4（README §5 已记）。
+   * 3D 版两轨统一在 init() 就施加边界——初值本应满足边界条件，这是更正确的做法，
+   * 故 3D 的 JS/Python 交叉验证从 t=0 起即逐位可比。
+   */
+  class HeatWorld3D extends Grid3D {
+    constructor(nx, ny, nz, opts) {
+      super(nx, ny, nz, opts);
+      const o = opts || {};
+      this.alpha = o.alpha != null ? o.alpha : 0.2;
+      this.dt = o.dt != null ? o.dt : 0.5;
+      this.lam = this.alpha * this.dt / (this.dx * this.dx);
+      if (this.lam > 1 / 6) {
+        throw new Error('CFL 不稳定：α·dt/dx² = ' + this.lam.toFixed(4) + ' > 1/6（3D 显式 FTCS 上限）。请调小 dt 或 alpha。');
       }
     }
     /** 推进一步（L1 物理演化，七点格式） */
@@ -245,16 +327,305 @@
       this.time += dt;
       return this.field;
     }
-    stats() {
-      let mx = -Infinity, mn = Infinity, sum = 0;
-      for (let k = 0; k < this.N; k++) { const v = this.field[k]; if (v > mx) mx = v; if (v < mn) mn = v; sum += v; }
-      return { max: mx, min: mn, mean: sum / this.N };
+  }
+
+  // ==================== L1 物理规律之二：声波（双曲型 PDE） ====================
+  /**
+   * 三维声波：∂²u/∂t² = c²∇²u − γ·∂u/∂t
+   * Leapfrog（蛙跳）显式格式；3D 稳定条件 Courant 数 c·dt/dx ≤ 1/√3 ≈ 0.5774。
+   * 与热传导【根本不同】：热是抛物型（平滑、不可逆、有耗散），波是双曲型（不平滑、可逆、能量守恒）。
+   * 因此这里用【能量守恒】而不是"衰减到 0"来验真——波跑一圈回来还是那个波。
+   */
+  class WaveWorld3D extends Grid3D {
+    constructor(nx, ny, nz, opts) {
+      super(nx, ny, nz, opts);
+      const o = opts || {};
+      this.c = o.c != null ? o.c : 1;
+      this.dt = o.dt != null ? o.dt : 0.2;
+      this.damping = o.damping != null ? o.damping : 0;
+      this.courant = this.c * this.dt / this.dx;
+      if (this.courant > 1 / Math.sqrt(3)) {
+        throw new Error('CFL 不稳定：c·dt/dx = ' + this.courant.toFixed(4)
+          + ' > 1/√3≈0.5774（3D 波动方程上限）。请调小 dt 或 c。');
+      }
+      this.prev = new Float64Array(this.N);
     }
-    /** 取 z=k 的切片（返回 nx*ny 的 Float64Array，行序 j） */
-    sliceZ(k) { return this.field.subarray(k * this.ny * this.nx, (k + 1) * this.ny * this.nx); }
-    /** 按【物理坐标】取 z 平面切片（取最近的一层） */
-    sliceAtZ(z) { return this.sliceZ(this.kOf(z)); }
-    flat() { return this.field; }
+    /** f(x,y,z)=初始位移 u₀；g(x,y,z)=初始速度 ∂u/∂t|₀（可选，默认 0） */
+    init(f, g) {
+      const { nx, ny, nz } = this;
+      for (let k = 0; k < nz; k++) for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+        const p = this.idx(i, j, k);
+        const x = this.xOf(i), y = this.yOf(j), z = this.zOf(k);
+        const u0 = f(x, y, z);
+        this.field[p] = u0;
+        this.prev[p] = g ? u0 - this.dt * g(x, y, z) : u0;   // u^{-1} = u⁰ − dt·v₀
+      }
+      this._applyBoundary();
+      // ★ prev 层同样要满足边界条件。漏掉这一步会让 u⁻¹ 在边界非零，
+      //   动能项凭空多出 ½(b/dt)²，误差随 dt 缩小反而【放大】（实测 dt 减半误差 ×4）。
+      this._applyBoundary(this.prev);
+      return this.field;
+    }
+    step() {
+      const { nx, ny, nz, dt, field, _buf, prev, sources } = this;
+      const C2 = this.courant * this.courant;
+      const a = 1 + this.damping * dt / 2, b = 1 - this.damping * dt / 2;
+      const sy = nx, sz = nx * ny;
+      for (let k = 0; k < nz; k++) for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+        const p = (k * ny + j) * nx + i;
+        if (this.isBoundary(i, j, k)) { _buf[p] = this.boundary; continue; }
+        const c0 = field[p];
+        const s = field[p - 1] + field[p + 1] + field[p - sy] + field[p + sy] + field[p - sz] + field[p + sz];
+        _buf[p] = (2 * c0 - b * prev[p] + C2 * (s - 6 * c0)) / a + dt * dt * sources[p];
+      }
+      prev.set(field);
+      this.field.set(_buf);
+      this.time += dt;
+      return this.field;
+    }
+    /**
+     * 蛙跳格式的【严格守恒量】。
+     * ⚠️ 不能用 ½Σ((u−u_prev)/dt)² + ½c²Σ|∇u|² 这种"看起来对"的写法：
+     *    动能项在 t−½ 层、势能项在 t 层，错开半层会让能量测出 O(dt) 的假漂移
+     *    （实测虚报 2.9% 衰减，而蛙跳本不该耗散）。
+     * 正确的守恒量是势能用【相邻两层的前向差分沿边内积】（与七点模板严格分部求和匹配）：
+     *    E = ½‖(uⁿ⁺¹−uⁿ)/dt‖²·dx³ + (c²/2)·Σ_edges (Δuⁿ⁺¹)(Δuⁿ)/dx² · dx³
+     * 注意是【前向差分沿边求和、含贴边那些边】，不是中心差分——用中心差分同样测不出守恒
+     * （实测中心差分版本虚报 19% 漂移）。
+     */
+    energy() {
+      const { nx, ny, nz, field, prev, dt, c, dx } = this;
+      const sy = nx, sz = nx * ny;
+      let kin = 0, pot = 0;
+      for (let k = 0; k < nz; k++) for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+        const p = (k * ny + j) * nx + i;
+        const v = (field[p] - prev[p]) / dt;
+        kin += v * v;
+        if (i + 1 < nx) { const q = p + 1; pot += (field[q] - field[p]) * (prev[q] - prev[p]); }
+        if (j + 1 < ny) { const q = p + sy; pot += (field[q] - field[p]) * (prev[q] - prev[p]); }
+        if (k + 1 < nz) { const q = p + sz; pot += (field[q] - field[p]) * (prev[q] - prev[p]); }
+      }
+      pot *= c * c / (dx * dx);
+      return 0.5 * (kin + pot) * dx * dx * dx;
+    }
+  }
+
+  // ==================== L1 物理规律之三：静电势（椭圆型 PDE） ====================
+  /**
+   * 静电势：∇²φ = −ρ/ε₀，Dirichlet 边界。
+   * 椭圆型——没有时间演化，是"瞬时平衡"问题，用 Jacobi 迭代求解。
+   * 它是【线性的】，所以可以严格验证叠加原理：两个电荷的解 = 各自解的逐点和。
+   */
+  class PoissonWorld3D extends Grid3D {
+    constructor(nx, ny, nz, opts) {
+      super(nx, ny, nz, opts);
+      const o = opts || {};
+      this.eps0 = o.eps0 != null ? o.eps0 : 1;
+      this.iters = 0; this.residual = Infinity;
+    }
+    /** 设置电荷密度 ρ(x,y,z)（复用 sources 数组，语义为 ρ 而非源项） */
+    setRho(fn) {
+      const { nx, ny, nz } = this;
+      for (let k = 0; k < nz; k++) for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+        this.sources[this.idx(i, j, k)] = fn(this.xOf(i), this.yOf(j), this.zOf(k));
+      }
+      return this.sources;
+    }
+    /** 点电荷（离散到最近格点，数值上等价于在该格放一个库仑源） */
+    addPointCharge(x, y, z, q) {
+      const p = this.indexAt(x, y, z);
+      if (p >= 0) this.sources[p] += q / (this.dx * this.dx * this.dx);
+    }
+    /** Jacobi 迭代；返回 {iters, residual}，residual = max|∇²φ + ρ/ε₀| */
+    solve(maxIter, tol) {
+      const it = maxIter != null ? maxIter : 3000, tv = tol != null ? tol : 1e-9;
+      const { nx, ny, nz, field, _buf, sources, eps0, dx } = this;
+      const C2 = dx * dx / eps0;
+      const sy = nx, sz = nx * ny;
+      let res = Infinity, n = 0;
+      for (n = 1; n <= it; n++) {
+        for (let k = 0; k < nz; k++) for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+          const p = (k * ny + j) * nx + i;
+          if (this.isBoundary(i, j, k)) { _buf[p] = this.boundary; continue; }
+          const s = field[p - 1] + field[p + 1] + field[p - sy] + field[p + sy] + field[p - sz] + field[p + sz];
+          _buf[p] = (s + C2 * sources[p]) / 6;
+        }
+        this.field.set(_buf);
+        if (n % 10 === 0 || n === it) {
+          res = 0;
+          for (let k = 1; k < nz - 1; k++) for (let j = 1; j < ny - 1; j++) for (let i = 1; i < nx - 1; i++) {
+            const p = (k * ny + j) * nx + i;
+            const s = field[p - 1] + field[p + 1] + field[p - sy] + field[p + sy] + field[p - sz] + field[p + sz];
+            res = Math.max(res, Math.abs((s - 6 * field[p]) / (dx * dx) + sources[p] / eps0));
+          }
+          if (res < tv) break;
+        }
+      }
+      this.iters = n; this.residual = res;
+      return { iters: n, residual: res };
+    }
+  }
+
+  // ==================== L1 物理规律之四：流体标量输运（对流–扩散） ====================
+  /**
+   * 对流–扩散方程：∂φ/∂t + u·∇φ = α∇²φ
+   * 对流项用【一阶迎风】（稳定但带数值扩散），扩散项用 FTCS。
+   * 稳定条件两者分别检查：Σ|uᵢ|·dt/dx ≤ 1 且 α·dt/dx² ≤ 1/6，超任一个 fail-closed。
+   *
+   * 这一类对降阶模型【天然不友好】：对流主导的问题 Kolmogorov n-width 衰减很慢，
+   * 即"很少的模态抓不住一个平移/旋转的斑"。验真会如实报出它的有效秩远高于热传导。
+   */
+  class AdvectDiffuseWorld3D extends Grid3D {
+    constructor(nx, ny, nz, opts) {
+      super(nx, ny, nz, opts);
+      const o = opts || {};
+      this.alpha = o.alpha != null ? o.alpha : 0.0;
+      this.dt = o.dt != null ? o.dt : 0.2;
+      this.omega = o.omega != null ? o.omega : 0.1;   // 绕 Z 轴刚体旋转的角速度
+      this.lam = this.alpha * this.dt / (this.dx * this.dx);
+      if (this.lam > 1 / 6) {
+        throw new Error('CFL 不稳定（扩散）：α·dt/dx² = ' + this.lam.toFixed(4) + ' > 1/6。');
+      }
+      // 采样速度场，求 Σ|uᵢ|·dt/dx 的上界
+      let vcfl = 0;
+      for (let k = 0; k < nz; k++) for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+        const u = this.velocityAt(this.xOf(i), this.yOf(j), this.zOf(k));
+        const s = (Math.abs(u[0]) + Math.abs(u[1]) + Math.abs(u[2])) * this.dt / this.dx;
+        if (s > vcfl) vcfl = s;
+      }
+      this.flowCFL = vcfl;
+      if (vcfl > 1) {
+        throw new Error('CFL 不稳定（对流）：Σ|uᵢ|·dt/dx = ' + vcfl.toFixed(4) + ' > 1。请调小 dt 或 omega。');
+      }
+    }
+    /** 速度场：绕 Z 轴的刚体旋转 u = (−ωy, ωx, 0)（无散度，不会人为压缩/拉伸物质） */
+    velocityAt(x, y, z) { return [-this.omega * y, this.omega * x, 0]; }
+    step() {
+      const { nx, ny, nz, dt, dx, field, _buf, alpha, sources } = this;
+      const sy = nx, sz = nx * ny;
+      for (let k = 0; k < nz; k++) for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+        const p = (k * ny + j) * nx + i;
+        if (this.isBoundary(i, j, k)) { _buf[p] = this.boundary; continue; }
+        const u = this.velocityAt(this.xOf(i), this.yOf(j), this.zOf(k));
+        // 迎风：速度指向哪边，就用那一侧的差商
+        const dphidx = u[0] >= 0 ? (field[p] - field[p - 1]) / dx : (field[p + 1] - field[p]) / dx;
+        const dphidy = u[1] >= 0 ? (field[p] - field[p - sy]) / dx : (field[p + sy] - field[p]) / dx;
+        const dphidz = u[2] >= 0 ? (field[p] - field[p - sz]) / dx : (field[p + sz] - field[p]) / dx;
+        const adv = u[0] * dphidx + u[1] * dphidy + u[2] * dphidz;
+        const s = field[p - 1] + field[p + 1] + field[p - sy] + field[p + sy] + field[p - sz] + field[p + sz];
+        const dif = alpha * (s - 6 * field[p]) / (dx * dx);
+        _buf[p] = field[p] + dt * (dif - adv + sources[p]);
+      }
+      this.field.set(_buf);
+      this.time += dt;
+      return this.field;
+    }
+    /** 物质总量 Σφ·dx³（纯对流无源时应近似守恒，边界会漏，故只作参考） */
+    mass() { let s = 0; for (let i = 0; i < this.N; i++) s += this.field[i]; return s * this.dx ** 3; }
+    /** 质心（世界坐标）——纯旋转时，转一整圈质心应回到出发点 */
+    centroid() {
+      let m = 0, cx = 0, cy = 0, cz = 0;
+      for (let k = 0; k < this.nz; k++) for (let j = 0; j < this.ny; j++) for (let i = 0; i < this.nx; i++) {
+        const v = this.field[this.idx(i, j, k)];
+        m += v; cx += v * this.xOf(i); cy += v * this.yOf(j); cz += v * this.zOf(k);
+      }
+      if (Math.abs(m) < 1e-300) return { x: 0, y: 0, z: 0, mass: 0 };
+      return { x: cx / m, y: cy / m, z: cz / m, mass: m };
+    }
+  }
+
+  // ==================== L1 物理规律之五：刚体（牛顿力学，非场） ====================
+  /**
+   * 刚体动力学（牛顿–欧拉方程）：这不是场，是世界里的"物体"。
+   *   平动：m·a = ΣF（含重力）        转动：I·ω̇ + ω×(I·ω) = τ
+   * 姿态用四元数 q 积分（避免万向锁）。惯性张量简化为【对角】(Ix,Iy,Iz)。
+   *
+   * 积分器：平动用【速度 Verlet】（恒力下位置精确，自由落体误差掉到 1e-16 量级），
+   * 转动用【RK2 中点】（比显式欧拉的角动量漂移小两个量级）。
+   * 诚实边界：无碰撞检测、无约束求解、无摩擦；仍是有限阶，长时间能量仍有缓慢漂移。
+   * 可严格验证的量：动量（恒力下逐位守恒）、无力矩时的角动量、自由落体与解析解的偏差。
+   */
+  class RigidBody3D {
+    constructor(opts) {
+      const o = opts || {};
+      this.mass = o.mass != null ? o.mass : 1;
+      this.Ix = o.Ix != null ? o.Ix : 1;
+      this.Iy = o.Iy != null ? o.Iy : 1;
+      this.Iz = o.Iz != null ? o.Iz : 1;
+      this.pos = (o.pos || [0, 0, 0]).slice();
+      this.vel = (o.vel || [0, 0, 0]).slice();
+      this.q = (o.q || [0, 0, 0, 1]).slice();          // [x,y,z,w]
+      this.omega = (o.omega || [0, 0, 0]).slice();      // 体坐标系角速度
+      this.gravity = (o.gravity || [0, 0, 0]).slice();
+      this._F = [0, 0, 0]; this._tau = [0, 0, 0];
+      this.time = 0;
+    }
+    cross(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+    /** 施加力 F（世界系）；r 为相对质心的作用点，非空则同时产生力矩 r×F */
+    applyForce(F, r) {
+      this._F[0] += F[0]; this._F[1] += F[1]; this._F[2] += F[2];
+      if (r) { const t = this.cross(r, F); this._tau[0] += t[0]; this._tau[1] += t[1]; this._tau[2] += t[2]; }
+    }
+    applyTorque(t) { this._tau[0] += t[0]; this._tau[1] += t[1]; this._tau[2] += t[2]; }
+    /** 四元数乘法 */
+    _qmul(a, b) {
+      return [
+        a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
+        a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
+        a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3],
+        a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2],
+      ];
+    }
+    /** 角加速度：ω̇ = I⁻¹(τ − ω×(Iω))（体坐标系） */
+    _omegaDot(w, tau) {
+      const Iw = [this.Ix * w[0], this.Iy * w[1], this.Iz * w[2]];
+      const gyro = this.cross(w, Iw);
+      return [(tau[0] - gyro[0]) / this.Ix, (tau[1] - gyro[1]) / this.Iy, (tau[2] - gyro[2]) / this.Iz];
+    }
+    /** 速度 Verlet（平动） + RK2 中点（转动与姿态） */
+    step(dt) {
+      const m = this.mass, g = this.gravity;
+      const acc = [(this._F[0] / m) + g[0], (this._F[1] / m) + g[1], (this._F[2] / m) + g[2]];
+      // 平动：x += v·dt + ½a·dt²；v += a·dt（恒加速度下位置精确）
+      for (let i = 0; i < 3; i++) { this.pos[i] += this.vel[i] * dt + 0.5 * acc[i] * dt * dt; this.vel[i] += acc[i] * dt; }
+      // 转动：RK2 中点法
+      const w0 = this.omega, tau = this._tau;
+      const k1 = this._omegaDot(w0, tau);
+      const wm = [w0[0] + 0.5 * dt * k1[0], w0[1] + 0.5 * dt * k1[1], w0[2] + 0.5 * dt * k1[2]];
+      const k2 = this._omegaDot(wm, tau);
+      this.omega = [w0[0] + dt * k2[0], w0[1] + dt * k2[1], w0[2] + dt * k2[2]];
+      // 姿态用中点角速度积分
+      const wq = [wm[0], wm[1], wm[2], 0];
+      const dq = this._qmul(wq, this.q).map(function (v) { return v * dt; });
+      for (let i = 0; i < 4; i++) this.q[i] += dq[i];
+      const nq = Math.hypot(this.q[0], this.q[1], this.q[2], this.q[3]) || 1;
+      for (let i = 0; i < 4; i++) this.q[i] /= nq;
+      this.time += dt;
+      this._F = [0, 0, 0]; this._tau = [0, 0, 0];
+      return this;
+    }
+    /** 体坐标 → 世界坐标 */
+    bodyToWorld(v) {
+      const [x, y, z, w] = this.q;
+      const t = [2 * (y * v[2] - z * v[1]), 2 * (z * v[0] - x * v[2]), 2 * (x * v[1] - y * v[0])];
+      return [
+        v[0] + w * t[0] + (y * t[2] - z * t[1]),
+        v[1] + w * t[1] + (z * t[0] - x * t[2]),
+        v[2] + w * t[2] + (x * t[1] - y * t[0]),
+      ];
+    }
+    momentum() { return [this.mass * this.vel[0], this.mass * this.vel[1], this.mass * this.vel[2]]; }
+    /** 角动量（世界系）：L = R·(I·ω_body) */
+    angularMomentum() {
+      return this.bodyToWorld([this.Ix * this.omega[0], this.Iy * this.omega[1], this.Iz * this.omega[2]]);
+    }
+    energy(groundY) {
+      const v2 = this.vel[0] ** 2 + this.vel[1] ** 2 + this.vel[2] ** 2;
+      const w = this.omega;
+      const rot = this.Ix * w[0] ** 2 + this.Iy * w[1] ** 2 + this.Iz * w[2] ** 2;
+      const gy = groundY != null ? groundY : 0;
+      return 0.5 * this.mass * v2 + 0.5 * rot + this.mass * 9.81 * (this.pos[1] - gy);
+    }
   }
 
   // ==================== L3：全息映射（POD/SVD 降阶） ====================
@@ -440,20 +811,15 @@
   function fitLinear(psiSeq) {
     const T = psiSeq.length; const r = psiSeq[0].length;
     if (T < r + 2) return null;
-    // P = [ψ_0..ψ_{T-2}]^T ((T-1)×r), Q = [ψ_1..ψ_{T-1}]
-    const M = []; // PᵀP (r×r)
-    for (let a = 0; a < r; a++) {
-      const row = new Array(r).fill(0);
-      for (let b = 0; b < r; b++) { let s = 0; for (let t = 0; t < T - 1; t++) s += psiSeq[t][a] * psiSeq[t][b]; row[b] = s; }
-      M.push(row);
-    }
+    // P = [ψ_0..ψ_{T-2}]ᵀ ((T-1)×r), Q = [ψ_1..ψ_{T-1}]；稳定 QR 最小二乘直接解 P·x = Q_o
+    const P = new Array(T - 1);
+    for (let t = 0; t < T - 1; t++) P[t] = psiSeq[t].slice();
     const A = [];
     let resid = 0;
     for (let o = 0; o < r; o++) {
-      const rhs = new Array(r).fill(0);
-      for (let a = 0; a < r; a++) { let s = 0; for (let t = 0; t < T - 1; t++) s += psiSeq[t][a] * psiSeq[t + 1][o]; rhs[a] = s; }
-      const sol = gaussSolve(M.map(row => row.slice()), rhs);
-      if (!sol) { A.push(new Array(r).fill(0)); continue; }
+      const y = new Array(T - 1);
+      for (let t = 0; t < T - 1; t++) y[t] = psiSeq[t + 1][o];
+      const sol = lstsq(P, y);
       A.push(sol); // A[o][a] 行=输出分量 o
       for (let t = 0; t < T - 1; t++) {
         let pred = 0; for (let a = 0; a < r; a++) pred += sol[a] * psiSeq[t][a];
@@ -491,31 +857,16 @@
     const T = psiSeq.length, r = psiSeq[0].length;
     if (T < r + 3) return null;
     const d = r + 1;
-    const M = [];
-    for (let a = 0; a < d; a++) {
-      const row = new Array(d).fill(0);
-      for (let b = 0; b < d; b++) {
-        let s = 0;
-        for (let t = 0; t < T - 1; t++) {
-          const xa = a < r ? psiSeq[t][a] : 1, xb = b < r ? psiSeq[t][b] : 1;
-          s += xa * xb;
-        }
-        row[b] = s;
-      }
-      M.push(row);
-    }
+    // P = [[ψ_t | 1]] ((T-1)×(r+1)), Q = ψ_{t+1}；稳定 QR 最小二乘
+    const P = new Array(T - 1);
+    for (let t = 0; t < T - 1; t++) P[t] = psiSeq[t].concat([1]);
     const A = [];
     let resid = 0;
     for (let o = 0; o < r; o++) {
-      const rhs = new Array(d).fill(0);
-      for (let a = 0; a < d; a++) {
-        let s = 0;
-        for (let t = 0; t < T - 1; t++) { const xa = a < r ? psiSeq[t][a] : 1; s += xa * psiSeq[t + 1][o]; }
-        rhs[a] = s;
-      }
-      const sol = gaussSolve(M.map(row => row.slice()), rhs);
-      if (!sol) { A.push(new Array(d).fill(0)); continue; }
-      A.push(sol);
+      const y = new Array(T - 1);
+      for (let t = 0; t < T - 1; t++) y[t] = psiSeq[t + 1][o];
+      const sol = lstsq(P, y);
+      A.push(sol); // sol 长度 r+1，最后一列即 b
       for (let t = 0; t < T - 1; t++) {
         let p = sol[r];
         for (let a = 0; a < r; a++) p += sol[a] * psiSeq[t][a];
@@ -525,6 +876,58 @@
     let scale = 0;
     for (let t = 1; t < T; t++) for (let o = 0; o < r; o++) scale += psiSeq[t][o] * psiSeq[t][o];
     return { A, r, affine: true, rms: Math.sqrt(resid / Math.max(T - 1, 1)), relErr: scale > 0 ? Math.sqrt(resid / scale) : 0 };
+  }
+
+  /**
+   * 二阶（AR(2)）边界动力学：ψ_{t+1} = A·ψ_t + B·ψ_{t−1} + c
+   *
+   * ⚠️ 为什么必须有这个：**波动方程是二阶系统**。用一阶仿射 ψ_{t+1}=Aψ_t+b 去拟合它，
+   * 是把二阶动力学塞进一阶模型——实测声波场景 6 步样本外预测误差 **7.5e+1（7532%）**，
+   * 不是精度不够，是模型类用错。热传导/对流是一阶系统，用 fitAffine 即可。
+   *
+   * 返回 M：r × (2r+1) 矩阵，列序 [ψ_t (r列) | ψ_{t−1} (r列) | 常数 (1列)]
+   */
+  function fitAffine2(psiSeq) {
+    const T = psiSeq.length, r = psiSeq[0].length;
+    if (T < 2 * r + 4) return null;
+    const d = 2 * r + 1;
+    // P_t = [ψ_t | ψ_{t−1} | 1]，t = 1 .. T-2，目标 ψ_{t+1}；稳定 QR 最小二乘
+    const rows = T - 2;
+    const P = new Array(rows);
+    for (let t = 1; t < T - 1; t++) P[t - 1] = psiSeq[t].concat(psiSeq[t - 1], [1]);
+    const A = [];
+    let resid = 0;
+    for (let o = 0; o < r; o++) {
+      const y = new Array(rows);
+      for (let t = 1; t < T - 1; t++) y[t - 1] = psiSeq[t + 1][o];
+      const sol = lstsq(P, y);
+      A.push(sol); // sol 长度 2r+1，列序 [ψ_t | ψ_{t−1} | 1]
+      for (let t = 1; t < T - 1; t++) {
+        let p = sol[2 * r];
+        for (let a = 0; a < r; a++) p += sol[a] * psiSeq[t][a] + sol[r + a] * psiSeq[t - 1][a];
+        const e = p - psiSeq[t + 1][o]; resid += e * e;
+      }
+    }
+    let scale = 0;
+    for (let t = 1; t < T; t++) for (let o = 0; o < r; o++) scale += psiSeq[t][o] * psiSeq[t][o];
+    return { A, r, order: 2, rms: Math.sqrt(resid / Math.max(T - 2, 1)), relErr: scale > 0 ? Math.sqrt(resid / scale) : 0 };
+  }
+
+  /** 用二阶模型做多步预测：从 (psiPrev, psi0) 出发递推 steps 次，返回 [psi0, psi1, ...] */
+  function predictAffine2(M, psi0, psiPrev, steps) {
+    const r = psi0.length;
+    const seq = [psi0.slice()];
+    let cur = psi0.slice(), prev = psiPrev.slice();
+    for (let s = 0; s < steps; s++) {
+      const nxt = new Array(r).fill(0);
+      for (let o = 0; o < r; o++) {
+        let v = M[o][2 * r];
+        for (let a = 0; a < r; a++) v += M[o][a] * cur[a] + M[o][r + a] * prev[a];
+        nxt[o] = v;
+      }
+      seq.push(nxt); prev = cur; cur = nxt;
+    }
+    return seq;
   }
 
   /** 用仿射模型做多步预测：ψ_t, ψ_{t+1}, ... */
@@ -544,5 +947,9 @@
     return seq;
   }
 
-  return { jacobiEigen, gaussSolve, HeatWorld, HeatWorld3D, HoloMap, fitLinear, fitAffine, predict, predictAffine };
+  return {
+    jacobiEigen, gaussSolve,
+    HeatWorld, HeatWorld3D, WaveWorld3D, PoissonWorld3D, AdvectDiffuseWorld3D, RigidBody3D, Grid3D,
+    HoloMap, fitLinear, fitAffine, fitAffine2, predict, predictAffine, predictAffine2,
+  };
 });

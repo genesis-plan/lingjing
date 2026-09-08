@@ -38,8 +38,10 @@ from typing import Callable, Dict, List, Optional, Sequence
 import numpy as np
 
 __all__ = [
-    "HeatWorld", "HeatWorld3D", "HoloMap", "fit_linear", "fit_affine",
-    "predict", "predict_affine",
+    "HeatWorld", "Grid3D", "HeatWorld3D", "WaveWorld3D", "PoissonWorld3D",
+    "AdvectDiffuseWorld3D", "RigidBody3D", "HoloMap",
+    "fit_linear", "fit_affine", "fit_affine2",
+    "predict", "predict_affine", "predict_affine2",
     "VerifyLedger", "decide", "sha256",
 ]
 
@@ -125,34 +127,27 @@ class HeatWorld:
                 "mean": float(self.field.mean())}
 
 
-class HeatWorld3D:
+class Grid3D:
     """
-    三维热传导：∂t φ = α∇²φ + s
-    显式 FTCS 七点格式。稳定条件（3D）：α·dt/dx² ≤ 1/6（比 2D 的 1/4 更严）。
+    三维世界的【公共底座】——网格 + 世界坐标系 + 边界 + 七点拉普拉斯。
+    所有物理世界（热传导 / 声波 / 静电势 / 流体输运）都继承它，
+    这样"唯一原点居中、XYZ 有正负半轴"这套坐标系只有一份实现，不会各写各的。
 
     场数组 shape = (nz, ny, nx)，展平为 C 序后与 JS 版 (k*ny + j)*nx + i 逐位一致。
-
-    与 2D 版的一处【刻意不同】：2D 版 JS 的 init() 不施加边界、要等第一次 step()，
-    而 Python 版 init() 立即施加，导致交叉验证初始 mean 差 1e-4（README §5 已记）。
-    3D 版两轨统一在 init() 就施加边界——初值本应满足边界条件，这是更正确的做法，
-    故 3D 的 JS/Python 交叉验证从 t=0 起即逐位可比。
     """
 
-    def __init__(self, nx: int = 20, ny: int = 20, nz: int = 20, alpha: float = 0.2,
-                 dt: float = 0.5, dx: float = 1.0, boundary: float = 0.0):
+    def __init__(self, nx: int = 21, ny: int = 21, nz: int = 21,
+                 dx: float = 1.0, boundary: float = 0.0):
         self.nx, self.ny, self.nz = int(nx), int(ny), int(nz)
         self.N = self.nx * self.ny * self.nz
-        self.alpha, self.dt, self.dx = float(alpha), float(dt), float(dx)
+        self.dx = float(dx)
         self.boundary = float(boundary)
-        self.lam = self.alpha * self.dt / (self.dx ** 2)
-        if self.lam > 1.0 / 6.0:
-            raise ValueError(
-                f"CFL 不稳定：α·dt/dx² = {self.lam:.4f} > 1/6（3D 显式 FTCS 上限）。"
-                f"请调小 dt 或 alpha，或调大 dx。"
-            )
         self.field = np.zeros((self.nz, self.ny, self.nx), dtype=np.float64)
         self.sources = np.zeros((self.nz, self.ny, self.nx), dtype=np.float64)
         self.time = 0.0
+
+    def idx(self, i: int, j: int, k: int) -> int:
+        return (k * self.ny + j) * self.nx + i
 
     # ------------------------------------------------------------------
     # 世界坐标系：唯一原点 (0,0,0) 在网格【正中心】，X/Y/Z 各有正负半轴。
@@ -191,14 +186,10 @@ class HeatWorld3D:
         return int(round(z / self.dx + self.oz))
 
     def index_at(self, x: float, y: float, z: float) -> int:
-        """世界坐标 -> (k,j,i)；越界返回 (-1,-1,-1)。"""
         i, j, k = self.i_of(x), self.j_of(y), self.k_of(z)
         if not (0 <= i < self.nx and 0 <= j < self.ny and 0 <= k < self.nz):
             return -1
         return self.idx(i, j, k)
-
-    def idx(self, i: int, j: int, k: int) -> int:
-        return (k * self.ny + j) * self.nx + i
 
     def coords_of(self, p: int) -> Tuple[float, float, float]:
         i = p % self.nx
@@ -218,9 +209,11 @@ class HeatWorld3D:
         }
 
     def init(self, f: Callable[[float, float, float], float]) -> np.ndarray:
-        """设置初始场 f(x, y, z) -> value，坐标为【物理世界坐标，带正负】，不是网格索引。"""
-        ii, jj, kk = np.meshgrid(np.arange(self.nx), np.arange(self.ny),
-                                 np.arange(self.nz), indexing="ij")
+        """设置初始场 f(x, y, z)，坐标为【物理世界坐标，带正负】，不是网格索引。"""
+        # ⚠️ 场数组 shape = (nz, ny, nx)，必须按 (nz, ny, nx) 生成网格并用 kk, jj, ii 接收。
+        #    写成 ii, jj, kk = meshgrid(nx, ny, nz) 会让 x/y/z 串位（形状相同不报错，极隐蔽）。
+        kk, jj, ii = np.meshgrid(np.arange(self.nz), np.arange(self.ny),
+                                 np.arange(self.nx), indexing="ij")
         xs = (ii - self.ox) * self.dx
         ys = (jj - self.oy) * self.dx
         zs = (kk - self.oz) * self.dx
@@ -230,7 +223,6 @@ class HeatWorld3D:
         return self.field
 
     def set_source(self, x: float, y: float, z: float, v: float) -> None:
-        """源/汇（正加热、负冷却），坐标为物理世界坐标。"""
         i, j, k = self.i_of(x), self.j_of(y), self.k_of(z)
         if 0 <= i < self.nx and 0 <= j < self.ny and 0 <= k < self.nz:
             self.sources[k, j, i] = float(v)
@@ -238,29 +230,29 @@ class HeatWorld3D:
     def clear_sources(self) -> None:
         self.sources[:] = 0.0
 
-    def _apply_boundary(self) -> None:
+    def _apply_boundary(self, arr=None) -> None:
+        """六面 Dirichlet 边界。arr 省略时作用于主场；蛙跳的 prev 层也必须施加。"""
+        f = self.field if arr is None else arr
         b = self.boundary
-        self.field[0, :, :] = b
-        self.field[-1, :, :] = b
-        self.field[:, 0, :] = b
-        self.field[:, -1, :] = b
-        self.field[:, :, 0] = b
-        self.field[:, :, -1] = b
+        f[:, :, 0] = b
+        f[:, :, -1] = b
+        f[:, 0, :] = b
+        f[:, -1, :] = b
+        f[0, :, :] = b
+        f[-1, :, :] = b
 
-    def step(self) -> np.ndarray:
-        """推进一步（L1 物理演化，向量化七点格式）。"""
-        f = self.field
-        lap = (f[1:-1, 1:-1, :-2] + f[1:-1, 1:-1, 2:]      # x
-               + f[1:-1, :-2, 1:-1] + f[1:-1, 2:, 1:-1]    # y
-               + f[:-2, 1:-1, 1:-1] + f[2:, 1:-1, 1:-1]    # z
-               - 6.0 * f[1:-1, 1:-1, 1:-1])
-        new = f.copy()
-        new[1:-1, 1:-1, 1:-1] = (f[1:-1, 1:-1, 1:-1] + self.lam * lap
-                                 + self.dt * self.sources[1:-1, 1:-1, 1:-1])
-        self.field = new
-        self._apply_boundary()
-        self.time += self.dt
-        return self.field
+    def is_boundary_mask(self) -> np.ndarray:
+        """内部格点掩码：True 表示参与演化（非边界）。"""
+        m = np.ones((self.nz, self.ny, self.nx), dtype=bool)
+        m[0, :, :] = m[-1, :, :] = False
+        m[:, 0, :] = m[:, -1, :] = False
+        m[:, :, 0] = m[:, :, -1] = False
+        return m
+
+    def stats(self) -> Dict[str, float]:
+        return {"max": float(self.field.max()),
+                "min": float(self.field.min()),
+                "mean": float(self.field.mean())}
 
     def flat(self) -> np.ndarray:
         """体状态向量 φ_h ∈ R^N（C 序展平，与 JS 版 (k*ny+j)*nx+i 一致）。"""
@@ -274,13 +266,344 @@ class HeatWorld3D:
         """按【物理坐标】取 z 平面切片（取最近的一层），shape (ny, nx)。"""
         return self.field[self.k_of(z)]
 
-    def stats(self) -> Dict[str, float]:
-        return {"max": float(self.field.max()),
-                "min": float(self.field.min()),
-                "mean": float(self.field.mean())}
+    def _laplacian(self, a: np.ndarray) -> np.ndarray:
+        """七点拉普拉斯 ∇²a（内部；边界返回 0）。"""
+        lap = np.zeros_like(a)
+        lap[1:-1, 1:-1, 1:-1] = (
+            a[1:-1, 1:-1, :-2] + a[1:-1, 1:-1, 2:]
+            + a[1:-1, :-2, 1:-1] + a[1:-1, 2:, 1:-1]
+            + a[:-2, 1:-1, 1:-1] + a[2:, 1:-1, 1:-1]
+            - 6.0 * a[1:-1, 1:-1, 1:-1]
+        ) / (self.dx ** 2)
+        return lap
 
 
-# ==================== L3：全息映射（POD / SVD 降阶） ====================
+class HeatWorld3D(Grid3D):
+    """
+    三维热传导：∂t φ = α∇²φ + s
+    显式 FTCS 七点格式。稳定条件（3D）：α·dt/dx² ≤ 1/6（比 2D 的 1/4 更严）。
+
+    与 2D 版的一处【刻意不同】：2D 版 JS 的 init() 不施加边界、要等第一次 step()，
+    而 Python 版 init() 立即施加，导致交叉验证初始 mean 差 1e-4（README §5 已记）。
+    3D 版两轨统一在 init() 就施加边界，故 3D 的 JS/Python 交叉验证从 t=0 起即逐位可比。
+    """
+
+    def __init__(self, nx: int = 21, ny: int = 21, nz: int = 21, alpha: float = 0.2,
+                 dt: float = 0.5, dx: float = 1.0, boundary: float = 0.0):
+        super().__init__(nx=nx, ny=ny, nz=nz, dx=dx, boundary=boundary)
+        self.alpha, self.dt = float(alpha), float(dt)
+        self.lam = self.alpha * self.dt / (self.dx ** 2)
+        if self.lam > 1.0 / 6.0:
+            raise ValueError(
+                f"CFL 不稳定：α·dt/dx² = {self.lam:.4f} > 1/6（3D 显式 FTCS 上限）。"
+                f"请调小 dt 或 alpha，或调大 dx。"
+            )
+
+    def step(self) -> np.ndarray:
+        f = self.field
+        nxt = f + self.dt * (self.alpha * self._laplacian(f) + self.sources)
+        self._apply_boundary_arr(nxt)
+        self.field = nxt
+        self.time += self.dt
+        return self.field
+
+    def _apply_boundary_arr(self, arr: np.ndarray) -> None:
+        b = self.boundary
+        arr[0, :, :] = b
+        arr[-1, :, :] = b
+        arr[:, 0, :] = b
+        arr[:, -1, :] = b
+        arr[:, :, 0] = b
+        arr[:, :, -1] = b
+
+
+class WaveWorld3D(Grid3D):
+    """
+    三维声波（双曲型）：∂²u/∂t² = c²∇²u − γ·∂u/∂t
+    Leapfrog（蛙跳）显式格式；3D 稳定条件 Courant 数 c·dt/dx ≤ 1/√3 ≈ 0.5774。
+
+    与热传导【根本不同】：热是抛物型（平滑、不可逆、有耗散），波是双曲型（不平滑、可逆、能量守恒）。
+    因此这里用【能量守恒】而不是"衰减到 0"来验真——波跑一圈回来还是那个波。
+    """
+
+    def __init__(self, nx: int = 21, ny: int = 21, nz: int = 21, c: float = 1.0,
+                 dt: float = 0.2, dx: float = 1.0, boundary: float = 0.0,
+                 damping: float = 0.0):
+        super().__init__(nx=nx, ny=ny, nz=nz, dx=dx, boundary=boundary)
+        self.c, self.dt = float(c), float(dt)
+        self.damping = float(damping)
+        self.courant = self.c * self.dt / self.dx
+        if self.courant > 1.0 / np.sqrt(3.0):
+            raise ValueError(
+                f"CFL 不稳定：c·dt/dx = {self.courant:.4f} > 1/√3≈0.5774"
+                f"（3D 波动方程上限）。请调小 dt 或 c。"
+            )
+        self.prev = np.zeros_like(self.field)
+
+    def init(self, f, g=None) -> np.ndarray:
+        """f(x,y,z)=初始位移 u₀；g(x,y,z)=初始速度（可选，默认 0）。"""
+        super().init(f)
+        if g is None:
+            self.prev = self.field.copy()
+        else:
+            vf = np.vectorize(g, otypes=[np.float64])
+            kk, jj, ii = np.meshgrid(np.arange(self.nz), np.arange(self.ny),
+                                     np.arange(self.nx), indexing="ij")
+            v0 = vf((ii - self.ox) * self.dx, (jj - self.oy) * self.dx,
+                    (kk - self.oz) * self.dx)
+            self.prev = self.field - self.dt * v0
+        # ★ prev 层同样要满足边界条件；漏掉会让 u⁻¹ 在边界非零，
+        #   动能项凭空多出 ½(b/dt)²，误差随 dt 缩小反而【放大】。
+        self._apply_boundary(self.prev)
+        return self.field
+
+    def step(self) -> np.ndarray:
+        a = 1.0 + self.damping * self.dt / 2.0
+        b = 1.0 - self.damping * self.dt / 2.0
+        lap = self._laplacian(self.field)
+        nxt = (2.0 * self.field - b * self.prev
+               + (self.c ** 2) * (self.dt ** 2) * lap) / a
+        nxt = nxt + (self.dt ** 2) * self.sources
+        self._apply_boundary(nxt)
+        self.prev = self.field
+        self.field = nxt
+        self.time += self.dt
+        return self.field
+
+    def energy(self) -> float:
+        """
+        蛙跳格式的【严格守恒量】：
+          E = ½‖(uⁿ⁺¹−uⁿ)/dt‖²·dx³ + (c²/2)·Σ_edges (Δuⁿ⁺¹)(Δuⁿ)/dx²·dx³
+        势能用【相邻两层的前向差分沿边内积】（与七点模板严格分部求和匹配）。
+        用中心差分或错半层都会测出假漂移（实测虚报 2.9% / 19%）。
+        """
+        du = self.field - self.prev
+        kin = float(np.sum((du / self.dt) ** 2))   # 0.5 在 return 处统一乘，别乘两次
+        pot = 0.0
+        pot += float(np.sum((self.field[:, :, 1:] - self.field[:, :, :-1])
+                            * (self.prev[:, :, 1:] - self.prev[:, :, :-1])))
+        pot += float(np.sum((self.field[:, 1:, :] - self.field[:, :-1, :])
+                            * (self.prev[:, 1:, :] - self.prev[:, :-1, :])))
+        pot += float(np.sum((self.field[1:, :, :] - self.field[:-1, :, :])
+                            * (self.prev[1:, :, :] - self.prev[:-1, :, :])))
+        pot *= (self.c ** 2) / (self.dx ** 2)
+        return 0.5 * (kin + pot) * (self.dx ** 3)
+
+
+class PoissonWorld3D(Grid3D):
+    """
+    静电势（椭圆型）：∇²φ = −ρ/ε₀，Dirichlet 边界。
+    椭圆型——没有时间演化，是"瞬时平衡"问题，用 Jacobi 迭代求解。
+    它是【线性的】，所以可以严格验证叠加原理：两个电荷的解 = 各自解的逐点和。
+    """
+
+    def __init__(self, nx: int = 21, ny: int = 21, nz: int = 21,
+                 dx: float = 1.0, boundary: float = 0.0, eps0: float = 1.0):
+        super().__init__(nx=nx, ny=ny, nz=nz, dx=dx, boundary=boundary)
+        self.eps0 = float(eps0)
+        self.iters = 0
+        self.residual = float("inf")
+
+    def set_rho(self, fn) -> np.ndarray:
+        kk, jj, ii = np.meshgrid(np.arange(self.nz), np.arange(self.ny),
+                                 np.arange(self.nx), indexing="ij")
+        vf = np.vectorize(fn, otypes=[np.float64])
+        self.sources = vf((ii - self.ox) * self.dx, (jj - self.oy) * self.dx,
+                          (kk - self.oz) * self.dx).astype(np.float64)
+        return self.sources
+
+    def add_point_charge(self, x: float, y: float, z: float, q: float) -> None:
+        i, j, k = self.i_of(x), self.j_of(y), self.k_of(z)
+        if 0 <= i < self.nx and 0 <= j < self.ny and 0 <= k < self.nz:
+            self.sources[k, j, i] += q / (self.dx ** 3)
+
+    def solve(self, max_iter: int = 3000, tol: float = 1e-9) -> Dict:
+        c2 = (self.dx ** 2) / self.eps0
+        phi = self.field
+        res = float("inf")
+        n = 0
+        for n in range(1, int(max_iter) + 1):
+            nxt = phi.copy()
+            nxt[1:-1, 1:-1, 1:-1] = (
+                phi[1:-1, 1:-1, :-2] + phi[1:-1, 1:-1, 2:]
+                + phi[1:-1, :-2, 1:-1] + phi[1:-1, 2:, 1:-1]
+                + phi[:-2, 1:-1, 1:-1] + phi[2:, 1:-1, 1:-1]
+                + c2 * self.sources[1:-1, 1:-1, 1:-1]
+            ) / 6.0
+            self._apply_boundary(nxt)
+            phi = nxt
+            if n % 10 == 0 or n == int(max_iter):
+                res = float(np.max(np.abs(
+                    self._laplacian(phi)[1:-1, 1:-1, 1:-1]
+                    + self.sources[1:-1, 1:-1, 1:-1] / self.eps0)))
+                if res < tol:
+                    break
+        self.field = phi
+        self.iters = n
+        self.residual = res
+        return {"iters": n, "residual": res}
+
+
+class AdvectDiffuseWorld3D(Grid3D):
+    """
+    对流–扩散方程：∂φ/∂t + u·∇φ = α∇²φ
+    对流项用【一阶迎风】（稳定但带数值扩散），扩散项用 FTCS。
+    稳定条件两者分别检查：Σ|uᵢ|·dt/dx ≤ 1 且 α·dt/dx² ≤ 1/6，超任一个 fail-closed。
+
+    这一类对降阶模型【天然不友好】：对流主导的问题 Kolmogorov n-width 衰减很慢，
+    即"很少的模态抓不住一个平移/旋转的斑"。验真会如实报出它的有效秩远高于热传导。
+    """
+
+    def __init__(self, nx: int = 21, ny: int = 21, nz: int = 21, alpha: float = 0.0,
+                 dt: float = 0.2, dx: float = 1.0, boundary: float = 0.0,
+                 omega: float = 0.1):
+        super().__init__(nx=nx, ny=ny, nz=nz, dx=dx, boundary=boundary)
+        self.alpha, self.dt = float(alpha), float(dt)
+        self.omega = float(omega)
+        self.lam = self.alpha * self.dt / (self.dx ** 2)
+        if self.lam > 1.0 / 6.0:
+            raise ValueError(
+                f"CFL 不稳定（扩散）：α·dt/dx² = {self.lam:.4f} > 1/6。"
+            )
+        kk, jj, ii = np.meshgrid(np.arange(self.nz), np.arange(self.ny),
+                                 np.arange(self.nx), indexing="ij")
+        xs = (ii - self.ox) * self.dx
+        ys = (jj - self.oy) * self.dx
+        self._U = (-self.omega * ys).astype(np.float64)
+        self._V = (self.omega * xs).astype(np.float64)
+        self._W = np.zeros_like(self._U)
+        vsum = np.max(np.abs(self._U) + np.abs(self._V) + np.abs(self._W))
+        self.flowCFL = float(vsum * self.dt / self.dx)
+        if self.flowCFL > 1.0:
+            raise ValueError(
+                f"CFL 不稳定（对流）：Σ|uᵢ|·dt/dx = {self.flowCFL:.4f} > 1。"
+                f"请调小 dt 或 omega。"
+            )
+
+    def velocity_at(self, x: float, y: float, z: float) -> Tuple[float, float, float]:
+        """绕 Z 轴的刚体旋转 u = (−ωy, ωx, 0)（无散度，不会人为压缩/拉伸物质）。"""
+        return (-self.omega * y, self.omega * x, 0.0)
+
+    def step(self) -> np.ndarray:
+        phi = self.field
+        dx = self.dx
+        dpx = np.where(self._U >= 0, phi - np.roll(phi, 1, axis=2), np.roll(phi, -1, axis=2) - phi) / dx
+        dpy = np.where(self._V >= 0, phi - np.roll(phi, 1, axis=1), np.roll(phi, -1, axis=1) - phi) / dx
+        dpz = np.where(self._W >= 0, phi - np.roll(phi, 1, axis=0), np.roll(phi, -1, axis=0) - phi) / dx
+        adv = self._U * dpx + self._V * dpy + self._W * dpz
+        nxt = phi + self.dt * (self.alpha * self._laplacian(phi) - adv + self.sources)
+        self._apply_boundary(nxt)
+        self.field = nxt
+        self.time += self.dt
+        return self.field
+
+    def mass(self) -> float:
+        return float(self.field.sum()) * (self.dx ** 3)
+
+    def centroid(self) -> Dict[str, float]:
+        kk, jj, ii = np.meshgrid(np.arange(self.nz), np.arange(self.ny),
+                                 np.arange(self.nx), indexing="ij")
+        m = float(self.field.sum())
+        if abs(m) < 1e-300:
+            return {"x": 0.0, "y": 0.0, "z": 0.0, "mass": 0.0}
+        xs = (ii - self.ox) * self.dx
+        ys = (jj - self.oy) * self.dx
+        zs = (kk - self.oz) * self.dx
+        return {"x": float((self.field * xs).sum() / m),
+                "y": float((self.field * ys).sum() / m),
+                "z": float((self.field * zs).sum() / m),
+                "mass": m}
+
+
+class RigidBody3D:
+    """
+    刚体动力学（牛顿–欧拉方程）：这不是场，是世界里的"物体"。
+        平动：m·a = ΣF（含重力）        转动：I·ω̇ + ω×(I·ω) = τ
+    姿态用四元数 q 积分（避免万向锁）。惯性张量简化为【对角】(Ix, Iy, Iz)。
+
+    诚实边界：无碰撞检测、无约束求解、无摩擦。半隐式欧拉是一阶，能量有 O(dt) 漂移。
+    可严格验证的量：动量（恒力下逐位守恒）、无力矩时的角动量、自由落体与解析解的偏差。
+    """
+
+    def __init__(self, mass: float = 1.0, Ix: float = 1.0, Iy: float = 1.0, Iz: float = 1.0,
+                 pos=(0.0, 0.0, 0.0), vel=(0.0, 0.0, 0.0),
+                 q=(0.0, 0.0, 0.0, 1.0), omega=(0.0, 0.0, 0.0),
+                 gravity=(0.0, 0.0, 0.0)):
+        self.mass = float(mass)
+        self.Ix, self.Iy, self.Iz = float(Ix), float(Iy), float(Iz)
+        self.pos = np.array(pos, dtype=np.float64)
+        self.vel = np.array(vel, dtype=np.float64)
+        self.q = np.array(q, dtype=np.float64)
+        self.omega = np.array(omega, dtype=np.float64)
+        self.gravity = np.array(gravity, dtype=np.float64)
+        self._F = np.zeros(3)
+        self._tau = np.zeros(3)
+        self.time = 0.0
+
+    def apply_force(self, F, r=None) -> None:
+        F = np.asarray(F, dtype=np.float64)
+        self._F += F
+        if r is not None:
+            self._tau += np.cross(np.asarray(r, dtype=np.float64), F)
+
+    def apply_torque(self, t) -> None:
+        self._tau += np.asarray(t, dtype=np.float64)
+
+    @staticmethod
+    def _qmul(a, b):
+        return np.array([
+            a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
+            a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
+            a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3],
+            a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2],
+        ])
+
+    def _omega_dot(self, w, tau):
+        Iw = np.array([self.Ix * w[0], self.Iy * w[1], self.Iz * w[2]])
+        gyro = np.cross(w, Iw)
+        I = np.array([self.Ix, self.Iy, self.Iz])
+        return (np.asarray(tau, dtype=np.float64) - gyro) / I
+
+    def step(self, dt: float):
+        """速度 Verlet（平动，恒加速度下位置精确）+ RK2 中点（转动与姿态）。"""
+        acc = self._F / self.mass + self.gravity
+        self.pos = self.pos + self.vel * dt + 0.5 * acc * dt * dt
+        self.vel = self.vel + acc * dt
+        w0 = self.omega
+        k1 = self._omega_dot(w0, self._tau)
+        wm = w0 + 0.5 * dt * k1
+        k2 = self._omega_dot(wm, self._tau)
+        self.omega = w0 + dt * k2
+        wq = np.array([wm[0], wm[1], wm[2], 0.0])
+        self.q = self.q + self._qmul(wq, self.q) * dt
+        self.q = self.q / (np.linalg.norm(self.q) or 1.0)
+        self.time += float(dt)
+        self._F = np.zeros(3)
+        self._tau = np.zeros(3)
+        return self
+
+    def body_to_world(self, v) -> np.ndarray:
+        x, y, z, w = self.q
+        v = np.asarray(v, dtype=np.float64)
+        t = np.array([2 * (y * v[2] - z * v[1]),
+                      2 * (z * v[0] - x * v[2]),
+                      2 * (x * v[1] - y * v[0])])
+        return v + w * t + np.cross(np.array([x, y, z]), t)
+
+    def momentum(self) -> np.ndarray:
+        return self.mass * self.vel
+
+    def angular_momentum(self) -> np.ndarray:
+        return self.body_to_world(np.array([self.Ix * self.omega[0],
+                                            self.Iy * self.omega[1],
+                                            self.Iz * self.omega[2]]))
+
+    def energy(self, ground_y: float = 0.0) -> float:
+        v2 = float(self.vel @ self.vel)
+        w = self.omega
+        rot = self.Ix * w[0] ** 2 + self.Iy * w[1] ** 2 + self.Iz * w[2] ** 2
+        return 0.5 * self.mass * v2 + 0.5 * rot + self.mass * 9.81 * (self.pos[1] - ground_y)
+
 
 class HoloMap:
     """
@@ -517,6 +840,51 @@ def predict_affine(A: np.ndarray, psi0: Sequence[float], steps: int) -> List[np.
     for _ in range(int(steps)):
         cur = A[:, :r] @ cur + A[:, r]
         seq.append(cur.copy())
+    return seq
+
+
+def fit_affine2(psi_seq: Sequence[Sequence[float]]) -> Optional[Dict]:
+    """
+    二阶（AR(2)）边界动力学：ψ_{t+1} = A·ψ_t + B·ψ_{t−1} + c
+
+    ⚠️ 为什么必须有：**波动方程是二阶系统**。用一阶仿射 ψ_{t+1}=Aψ_t+b 去拟合它，
+    是把二阶动力学塞进一阶模型——实测声波场景 6 步样本外预测误差 **7.5e+1（7532%）**，
+    不是精度不够，是模型类用错。热传导/对流是一阶系统，用 fit_affine 即可。
+
+    返回 {"A": M (r, 2r+1)，列序 [ψ_t (r列) | ψ_{t−1} (r列) | 常数 (1列)], r, order, rms, rel_err}
+    """
+    S = np.asarray(psi_seq, dtype=np.float64)
+    if S.ndim != 2 or S.shape[0] < 5:
+        return None
+    T, r = S.shape
+    # 设计矩阵 P_t = [ψ_t | ψ_{t−1} | 1]，t = 1 .. T-2，目标 ψ_{t+1}
+    P = np.hstack([S[1:-1], S[:-2], np.ones((T - 2, 1))])
+    Q = S[2:]
+    sol, *_ = np.linalg.lstsq(P, Q, rcond=None)         # (2r+1, r)
+    A = sol.T                                            # (r, 2r+1)
+    resid = float(((P @ A.T - Q) ** 2).sum())
+    scale = float((S[1:] ** 2).sum())
+    return {
+        "A": A,
+        "r": int(r),
+        "order": 2,
+        "rms": float(np.sqrt(resid / max(T - 2, 1))),
+        "rel_err": float(np.sqrt(resid / scale)) if scale > 0 else 0.0,
+    }
+
+
+def predict_affine2(M: np.ndarray, psi0: Sequence[float],
+                    psi_prev: Sequence[float], steps: int) -> List[np.ndarray]:
+    """用二阶模型做多步预测：从 (psi_prev, psi0) 递推 steps 次。"""
+    M = np.asarray(M, dtype=np.float64)
+    cur = np.asarray(psi0, dtype=np.float64).reshape(-1)
+    prev = np.asarray(psi_prev, dtype=np.float64).reshape(-1)
+    r = cur.size
+    seq = [cur.copy()]
+    for _ in range(int(steps)):
+        nxt = M[:, :r] @ cur + M[:, r:2 * r] @ prev + M[:, 2 * r]
+        seq.append(nxt.copy())
+        prev, cur = cur, nxt
     return seq
 
 
