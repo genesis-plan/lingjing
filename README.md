@@ -66,6 +66,7 @@ python adapt_loop.py     # 自适应闭环 v2：观察→学律(区间)→映射
 python verify_experience.py  # 经验驱动 E2E：学出的律当 RealWorld3D 的 central_law 跑（贴合真世界 / 硬写律偏离）
 python verify_sensor.py      # 真实世界条件体检：观测≠真值（欠采样+带噪+速度不可测）——朴素差分崩 vs RTS 平滑恢复
 python verify_ground.py      # 地面世界：推花盆（观察→干预→学质量/摩擦/稳度），与 JS 逐位对照
+python verify_dynamic.py      # 动态观测：被动看运动的地面物体（RTS 平滑带噪轨迹→学 μg / g），与 JS 同量级对照
 ```
 
 可选接入真灵数求解器（lingshu-solver，JS 实现，经子进程调用）：
@@ -88,6 +89,7 @@ node verify_world.js     # 真实世界验真（原点=地球中心 · 中心引
 node verify_experience.js  # 经验驱动 E2E：学出的律当 RealWorld3D 的 centralLaw 跑（与 .py 逐项对照）
 node verify_sensor.js      # 真实世界条件体检（与 .py 量级对照）：朴素差分 σ=0.02 已 12%、σ=0.1 达 318%；RTS 平滑 0.1%→5%
 node verify_ground.js      # 地面世界：推花盆（Housner 摇摆+库仑摩擦），干预响应反推 m̂/μ̂/α̂，经验预测 vs 真实（与 .py 逐位一致）
+node verify_dynamic.js      # 动态观测：被动看运动的地面物体（RTS 平滑带噪轨迹→学 μg / g），与 .py 同量级对照（独立种子噪声）
 # 或直接用浏览器打开 index.html / sim3d.html（sim3d.html 可切换三种物理规律）
 ```
 
@@ -340,6 +342,8 @@ Python 版 `HeatWorld.init()` 立即施加 Dirichlet 边界；JS 版 `init()` �
 | `verify_sensor.py` | Python 验真：真实世界条件体检，与 JS 量级对照（B 律 c0 误差 1.84% vs JS 1.85% 等） |
 | `verify_ground.js` | Node 验真：**地面世界**——推花盆（Housner 摇摆块 + 库仑摩擦）：轻推学质量 m̂=J/Δv、滑距学摩擦 μ̂=v0²/2dg、二分扫冲量找翻倒阈值反解稳度 α̂=atan(R/h)，经验预测 vs 真实全一致（被动观察给关联、干预才给因果） |
 | `verify_ground.py` | Python 验真：地面世界推花盆，与 JS **逐位对照**（J*=1.4067、α̂=25.017° 等全部一致） |
+| `verify_dynamic.js` | Node 验真：**动态观测**——被动看运动的地面物体（不碰对象，只拿带噪位置流）：RTS 平滑出状态→学动力学。场景A 滑动块学 μg（纯滑动中 m/μ 不可分）、场景B 抛体学真物理常数 g；复用 verify_sensor 的 RTS 纪律，证明"动态观测=已验证范式" |
+| `verify_dynamic.py` | Python 验真：动态观测，与 JS 同量级对照（关键量误差均 <1.1%；独立种子噪声，无噪部分逐位一致） |
 | `lingjing-mcp.js` | **MCP stdio 服务（给 AI Agent 用）**：`world_sim` / `law_learn` / `law_eval` / `experience_get` / `experience_absorb`，零依赖，`--experience <path>` 跨会话经验持久化，`--selftest` 自检 12/12 |
 | `experience.js` | 经验持久存储：μ±δ + nObs 落盘 JSON，`absorb()` 与 `adapt_loop.py` 的 Experience 逐位一致（冲突放大 δ），损坏文件 fail-closed |
 | `index.html` | 浏览器演示（2D）：真场 / 重建场 / 预演场三视图 + 五层状态 + 审计账本 |
