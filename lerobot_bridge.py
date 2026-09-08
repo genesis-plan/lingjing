@@ -6,6 +6,14 @@
 把 Hugging Face LeRobot 格式的真实机器人录制（observation.state 时间序列）喂进
 灵境的 RTS 平滑 + 动力学辨识管线，验证"我们的代码能吃真实世界数据"。
 
+📋 操作政策（合规，用户拍板）：**只使用、不保留、不改、不分发**。
+  · 只使用：拉取数据→跑本桥验证方法→即可；把第三方数据当临时输入，不长期囤。
+  · 不保留：跑完即删原始数据文件（HF 模式本桥自动清理临时副本；注意 HF 可能在
+    ~/.cache/huggingface 另留缓存，用户可自行清）。只留下*我们自己的*分析产出。
+  · 不改：绝不修改原始数据文件；本桥只读，产出的是我们独立的平滑/辨识结果。
+  · 不分发：绝不把原始数据或含原始数据的包对外发。
+  · 合法：只用显式 Apache-2.0 / MIT 等可商用子集（见下方许可合规），避开 non-commercial 研究-only 子集。
+
 ⚠ 诚实边界（务必读）：
   · 这是**离线回放**真实录制，不是实时操控机器人——但数据是真实机器臂的物理记录
     （关节角/末端位姿由编码器+标定估出，本身也带误差，呼应 verify_sensor "观测≠真值"）。
@@ -109,11 +117,13 @@ def characterize(xsf, H, label):
     return v_max, a_max, quiet_frac
 
 def main():
+    import tempfile, shutil, os
     if len(sys.argv) < 2:
         print(__doc__)
         sys.exit(1)
 
     # 取数据
+    cleanup = None  # 本地模式(用户自带文件)无临时副本可删；HF 模式指向临时目录
     if len(sys.argv) == 2:
         path = sys.argv[1]
     else:
@@ -123,7 +133,11 @@ def main():
         except ImportError:
             print('需要 huggingface_hub：pip install huggingface_hub')
             sys.exit(1)
-        path = hf_hub_download(repo_id=repo_id, filename=fname, repo_type='dataset')
+        tmp = tempfile.mkdtemp(prefix='lerobot_')
+        # 下载到临时目录（不进 HF 默认缓存），跑完即删——落实"不保留"
+        path = hf_hub_download(repo_id=repo_id, filename=fname, repo_type='dataset',
+                               local_dir=tmp, local_dir_use_symlinks=False)
+        cleanup = tmp
 
     import pandas as pd
     df = pd.read_parquet(path)
@@ -167,6 +181,11 @@ def main():
     print('  · 真实录制已成功喂进灵境 RTS 平滑管线——验证"带噪观测→平滑→动力学恢复"对真机数据成立；')
     print('  · 真实机器人运动多为分段匀速+停顿/精修，与天空轨道/抛体的连续匀加速不同（模型类要匹配）；')
     print('  · 要笛卡尔末端轨迹(学 g/μg 那套)需正运动学(FK/URDF)，下一步接；本桥先证明"能吃真实数据"。')
+
+    # 不保留：HF 模式跑完即删原始数据临时副本（本地模式 cleanup=None，跳过）
+    if cleanup is not None:
+        shutil.rmtree(cleanup, ignore_errors=True)
+        print(f'\n[合规] 已删除临时下载目录 {cleanup}（原始数据未保留在本地）')
 
 if __name__ == '__main__':
     main()
