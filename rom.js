@@ -628,6 +628,144 @@
     }
   }
 
+  // ==================== 真实世界（原点=地球中心 · 中心引力 + 多体 + 数学规律） ====================
+  /**
+   * RealWorld3D：把"三维虚拟空间"升级为更接近真实世界的系统。
+   *   - 物理层（现实规律，含运动）：以原点模拟为地球中心，从原点产生反平方中心引力
+   *       F = −G·M·m·r̂ / r²；可选物体间互引力（N 体）；可选弹性碰撞（现实规律的相互作用）。
+   *   - 数学层（数学规律，区别于物理力）：
+   *       ◇ MG 几何约束律：物体被约束在给定半径的球面上（纯数学结构，非力，每步投影）。
+   *       ◇ MI 不变量律：三大连续对称对应的守恒量——能量(时间平移)、角动量(SO(3)旋转)、
+   *         动量(平移)——由对称性推出，显式测量其漂移作为"数学规律在生效"的证据。
+   *       ◇ 反平方专属数学律（Bertrand）：离心率矢量 e_vec 守恒 ⇒ 所有束缚轨道是闭合椭圆。
+   * 积分器：速度 Verlet（辛，长期能量漂移远低于显式欧拉）。
+   * 诚实边界：无广义相对论修正、无潮汐、碰撞为简化弹性、球约束后"速度切向化"是数学约束非物理。
+   */
+  class RealWorld3D {
+    constructor(opts) {
+      const o = opts || {};
+      this.G = o.G != null ? o.G : 1.0;            // 引力常数
+      this.M = o.M != null ? o.M : 1000.0;          // 原点处中心质量（地球）
+      this.rMin = o.rMin != null ? o.rMin : 0.5;    // 奇点护栏：距原点过近直接拒
+      this.mutual = !!o.mutual;                     // 是否启用物体间互引力
+      this.collide = o.collide != null ? o.collide : false;  // 弹性碰撞
+      this.constraint = o.constraint || null;       // null | {type:'sphere', R}
+      this.bodies = [];                             // {pos,vel,mass,radius}
+      this.time = 0;
+    }
+    addBody(pos, vel, mass, radius) {
+      this.bodies.push({ pos: pos.slice(), vel: vel.slice(), mass: mass, radius: radius || 0.2 });
+      return this;
+    }
+    _accel() {
+      const bs = this.bodies, n = bs.length, GM = this.G * this.M;
+      const A = bs.map(function () { return [0, 0, 0]; });
+      for (let i = 0; i < n; i++) {
+        const r = bs[i].pos;
+        const rr = Math.hypot(r[0], r[1], r[2]);
+        if (rr < this.rMin) throw new Error('中心引力奇点：物体#' + i + ' 距原点 ' + rr.toExponential(2) + ' < rMin=' + this.rMin + '（fail-closed）');
+        const f = -GM / (rr * rr * rr);
+        A[i][0] += f * r[0]; A[i][1] += f * r[1]; A[i][2] += f * r[2];
+        if (this.mutual) {
+          for (let j = 0; j < n; j++) {
+            if (j === i) continue;
+            const d = [r[0] - bs[j].pos[0], r[1] - bs[j].pos[1], r[2] - bs[j].pos[2]];
+            const dd = Math.hypot(d[0], d[1], d[2]);
+            if (dd < 1e-9) continue;
+            const g = -this.G * bs[j].mass / (dd * dd * dd);
+            A[i][0] += g * d[0]; A[i][1] += g * d[1]; A[i][2] += g * d[2];
+          }
+        }
+      }
+      return A;
+    }
+    step(dt) {
+      const bs = this.bodies, n = bs.length;
+      const A0 = this._accel();
+      for (let i = 0; i < n; i++) for (let k = 0; k < 3; k++) bs[i].pos[k] += bs[i].vel[k] * dt + 0.5 * A0[i][k] * dt * dt;
+      const A1 = this._accel();
+      for (let i = 0; i < n; i++) for (let k = 0; k < 3; k++) bs[i].vel[k] += 0.5 * (A0[i][k] + A1[i][k]) * dt;
+      if (this.collide) this._collide();
+      if (this.constraint) this._applyConstraint();
+      this.time += dt;
+      return this;
+    }
+    _collide() {
+      const bs = this.bodies;
+      for (let i = 0; i < bs.length; i++) for (let j = i + 1; j < bs.length; j++) {
+        const a = bs[i], b = bs[j];
+        const d = [a.pos[0] - b.pos[0], a.pos[1] - b.pos[1], a.pos[2] - b.pos[2]];
+        const dist = Math.hypot(d[0], d[1], d[2]), rs = a.radius + b.radius;
+        if (dist < rs && dist > 1e-9) {
+          const nrm = [d[0] / dist, d[1] / dist, d[2] / dist];
+          const rel = (a.vel[0] - b.vel[0]) * nrm[0] + (a.vel[1] - b.vel[1]) * nrm[1] + (a.vel[2] - b.vel[2]) * nrm[2];
+          if (rel < 0) {
+            const ma = a.mass, mb = b.mass, imp = 2 * rel / (ma + mb);
+            for (let k = 0; k < 3; k++) { a.vel[k] -= imp * mb * nrm[k]; b.vel[k] += imp * ma * nrm[k]; }
+          }
+        }
+      }
+    }
+    _applyConstraint() {
+      if (this.constraint.type === 'sphere') {
+        const R = this.constraint.R;
+        for (const b of this.bodies) {
+          const rr = Math.hypot(b.pos[0], b.pos[1], b.pos[2]) || 1e-12, s = R / rr;
+          for (let k = 0; k < 3; k++) b.pos[k] *= s;
+          const rhat = [b.pos[0] / R, b.pos[1] / R, b.pos[2] / R];
+          const vr = b.vel[0] * rhat[0] + b.vel[1] * rhat[1] + b.vel[2] * rhat[2];
+          for (let k = 0; k < 3; k++) b.vel[k] -= vr * rhat[k];   // 切向化：数学约束非力
+        }
+      }
+    }
+    energy() {
+      let E = 0; const GM = this.G * this.M, bs = this.bodies;
+      for (let i = 0; i < bs.length; i++) {
+        const b = bs[i], v2 = b.vel[0] ** 2 + b.vel[1] ** 2 + b.vel[2] ** 2;
+        const r = Math.hypot(b.pos[0], b.pos[1], b.pos[2]);
+        E += 0.5 * b.mass * v2 - GM * b.mass / r;
+        if (this.mutual) for (let j = 0; j < i; j++) {
+          const d = Math.hypot(b.pos[0] - bs[j].pos[0], b.pos[1] - bs[j].pos[1], b.pos[2] - bs[j].pos[2]);
+          E += -this.G * b.mass * bs[j].mass / d;
+        }
+      }
+      return E;
+    }
+    angularMomentum() {
+      let L = [0, 0, 0];
+      for (const b of this.bodies) {
+        L[0] += b.mass * (b.pos[1] * b.vel[2] - b.pos[2] * b.vel[1]);
+        L[1] += b.mass * (b.pos[2] * b.vel[0] - b.pos[0] * b.vel[2]);
+        L[2] += b.mass * (b.pos[0] * b.vel[1] - b.pos[1] * b.vel[0]);
+      }
+      return L;
+    }
+    momentum() {
+      let P = [0, 0, 0];
+      for (const b of this.bodies) { P[0] += b.mass * b.vel[0]; P[1] += b.mass * b.vel[1]; P[2] += b.mass * b.vel[2]; }
+      return P;
+    }
+    com() {
+      let c = [0, 0, 0], m = 0;
+      for (const b of this.bodies) { c[0] += b.mass * b.pos[0]; c[1] += b.mass * b.pos[1]; c[2] += b.mass * b.pos[2]; m += b.mass; }
+      return [c[0] / m, c[1] / m, c[2] / m];
+    }
+    /** 离心率矢量（反平方中心力的数学不变量）：e_vec = ((v²−μ/r)·r − (r·v)·v)/μ */
+    eccVector(i) {
+      const b = this.bodies[i], GM = this.G * this.M;
+      const r = b.pos, v = b.vel;
+      const rr = Math.hypot(r[0], r[1], r[2]);
+      const v2 = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
+      const rv = r[0] * v[0] + r[1] * v[1] + r[2] * v[2];
+      const c = v2 - GM / rr;
+      return [
+        (c * r[0] - rv * v[0]) / GM,
+        (c * r[1] - rv * v[1]) / GM,
+        (c * r[2] - rv * v[2]) / GM,
+      ];
+    }
+  }
+
   // ==================== L3：全息映射（POD/SVD 降阶） ====================
 
   /**
@@ -949,7 +1087,7 @@
 
   return {
     jacobiEigen, gaussSolve,
-    HeatWorld, HeatWorld3D, WaveWorld3D, PoissonWorld3D, AdvectDiffuseWorld3D, RigidBody3D, Grid3D,
+    HeatWorld, HeatWorld3D, WaveWorld3D, PoissonWorld3D, AdvectDiffuseWorld3D, RigidBody3D, Grid3D, RealWorld3D,
     HoloMap, fitLinear, fitAffine, fitAffine2, predict, predictAffine, predictAffine2,
   };
 });

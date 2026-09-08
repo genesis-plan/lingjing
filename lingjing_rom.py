@@ -605,6 +605,160 @@ class RigidBody3D:
         return 0.5 * self.mass * v2 + 0.5 * rot + self.mass * 9.81 * (self.pos[1] - ground_y)
 
 
+class RealWorld3D:
+    """
+    真实世界（原点=地球中心 · 中心引力 + 多体 + 数学规律）。
+
+    物理层（现实规律，含运动）：
+        - 以原点模拟为地球中心，从原点产生反平方中心引力 F = −G·M·m·r̂ / r²；
+        - 可选物体间互引力（N 体）；可选弹性碰撞（现实规律的相互作用）。
+    数学层（数学规律，区别于物理力）：
+        - MG 几何约束律：物体被约束在给定半径的球面上（纯数学结构，非力，每步投影）；
+        - MI 不变量律：能量(时间平移对称)、角动量(SO(3)旋转对称)、动量(平移对称)
+          由连续对称推出，显式测量其漂移作为"数学规律在生效"的证据；
+        - 反平方专属数学律（Bertrand）：离心率矢量 e_vec 守恒 ⇒ 所有束缚轨道是闭合椭圆。
+
+    积分器：速度 Verlet（辛，长期能量漂移远低于显式欧拉）。
+    诚实边界：无广义相对论修正、无潮汐、碰撞为简化弹性、球约束后"速度切向化"是
+    数学约束非物理力。
+    """
+
+    def __init__(self, G: float = 1.0, M: float = 1000.0, r_min: float = 0.5,
+                 mutual: bool = False, collide: bool = False, constraint=None):
+        self.G = float(G)
+        self.M = float(M)
+        self.r_min = float(r_min)
+        self.mutual = bool(mutual)
+        self.collide = bool(collide)
+        self.constraint = constraint  # None | {"type":"sphere","R":float}
+        self.bodies: List[Dict] = []
+        self.time = 0.0
+
+    def add_body(self, pos, vel, mass, radius: float = 0.2) -> "RealWorld3D":
+        self.bodies.append({
+            "pos": np.array(pos, dtype=np.float64),
+            "vel": np.array(vel, dtype=np.float64),
+            "mass": float(mass),
+            "radius": float(radius),
+        })
+        return self
+
+    def _accel(self):
+        bs = self.bodies
+        n = len(bs)
+        GM = self.G * self.M
+        A = [np.zeros(3) for _ in range(n)]
+        for i in range(n):
+            r = bs[i]["pos"]
+            rr = float(np.linalg.norm(r))
+            if rr < self.r_min:
+                raise RuntimeError(
+                    f"中心引力奇点：物体#{i} 距原点 {rr:.2e} < r_min={self.r_min}（fail-closed）")
+            f = -GM / (rr ** 3)
+            A[i] = f * r
+            if self.mutual:
+                for j in range(n):
+                    if j == i:
+                        continue
+                    d = r - bs[j]["pos"]
+                    dd = float(np.linalg.norm(d))
+                    if dd < 1e-9:
+                        continue
+                    g = -self.G * bs[j]["mass"] / (dd ** 3)
+                    A[i] = A[i] + g * d
+        return A
+
+    def step(self, dt: float):
+        bs = self.bodies
+        n = len(bs)
+        A0 = self._accel()
+        for i in range(n):
+            bs[i]["pos"] = bs[i]["pos"] + bs[i]["vel"] * dt + 0.5 * A0[i] * dt * dt
+        A1 = self._accel()
+        for i in range(n):
+            bs[i]["vel"] = bs[i]["vel"] + 0.5 * (A0[i] + A1[i]) * dt
+        if self.collide:
+            self._collide()
+        if self.constraint is not None:
+            self._apply_constraint()
+        self.time += float(dt)
+        return self
+
+    def _collide(self):
+        bs = self.bodies
+        for i in range(len(bs)):
+            for j in range(i + 1, len(bs)):
+                a, b = bs[i], bs[j]
+                d = a["pos"] - b["pos"]
+                dist = float(np.linalg.norm(d))
+                rs = a["radius"] + b["radius"]
+                if dist < rs and dist > 1e-9:
+                    nrm = d / dist
+                    rel = float((a["vel"] - b["vel"]) @ nrm)
+                    if rel < 0:
+                        ma, mb = a["mass"], b["mass"]
+                        imp = 2 * rel / (ma + mb)
+                        a["vel"] = a["vel"] - imp * mb * nrm
+                        b["vel"] = b["vel"] + imp * ma * nrm
+
+    def _apply_constraint(self):
+        if self.constraint is not None and self.constraint.get("type") == "sphere":
+            R = float(self.constraint["R"])
+            for b in self.bodies:
+                rr = float(np.linalg.norm(b["pos"])) or 1e-12
+                b["pos"] = b["pos"] * (R / rr)
+                rhat = b["pos"] / R
+                vr = float(b["vel"] @ rhat)
+                b["vel"] = b["vel"] - vr * rhat  # 切向化：数学约束非力
+
+    def energy(self) -> float:
+        E = 0.0
+        GM = self.G * self.M
+        bs = self.bodies
+        for i in range(len(bs)):
+            b = bs[i]
+            v2 = float(b["vel"] @ b["vel"])
+            r = float(np.linalg.norm(b["pos"]))
+            E += 0.5 * b["mass"] * v2 - GM * b["mass"] / r
+            if self.mutual:
+                for j in range(i):
+                    d = float(np.linalg.norm(b["pos"] - bs[j]["pos"]))
+                    E += -self.G * b["mass"] * bs[j]["mass"] / d
+        return E
+
+    def angular_momentum(self) -> np.ndarray:
+        L = np.zeros(3)
+        for b in self.bodies:
+            L += b["mass"] * np.cross(b["pos"], b["vel"])
+        return L
+
+    def momentum(self) -> np.ndarray:
+        P = np.zeros(3)
+        for b in self.bodies:
+            P += b["mass"] * b["vel"]
+        return P
+
+    def com(self) -> np.ndarray:
+        c = np.zeros(3)
+        m = 0.0
+        for b in self.bodies:
+            c += b["mass"] * b["pos"]
+            m += b["mass"]
+        return c / m
+
+    def ecc_vector(self, i: int) -> np.ndarray:
+        """离心率矢量（反平方中心力的数学不变量）：e_vec = ((v²−μ/r)·r − (r·v)·v)/μ"""
+        b = self.bodies[i]
+        GM = self.G * self.M
+        r = b["pos"]
+        v = b["vel"]
+        rr = float(np.linalg.norm(r))
+        v2 = float(v @ v)
+        rv = float(r @ v)
+        c = v2 - GM / rr
+        return (c * r - rv * v) / GM
+
+
 class HoloMap:
     """
     Φ_Holo ∈ R^{N×r}，method of snapshots：

@@ -24,8 +24,8 @@
 
 | 层 | 名称 | 数学对象 | 本仓库实现 |
 | :--- | :--- | :--- | :--- |
-| 1 | 物理底座 | \(\mathcal{M}_{3,1} + \mathcal{E}_{\text{PDE}}\) | `rom.js` / `lingjing_rom.py` — 二维热传导 + 三维**四类场 PDE**（热传导 / 声波 / 静电势 / 流体输运） |
-| 2 | 体空间状态 | \(\phi(t,\mathbf{x})\) | `Grid3D` 基类 + `HeatWorld3D` / `WaveWorld3D` / `PoissonWorld3D` / `AdvectDiffuseWorld3D` + `RigidBody3D`（非场物体） |
+| 1 | 物理底座 | \(\mathcal{M}_{3,1} + \mathcal{E}_{\text{PDE}}\) | `rom.js` / `lingjing_rom.py` — 二维热传导 + 三维**四类场 PDE**（热传导 / 声波 / 静电势 / 流体输运）+ 三维**真实世界**（`RealWorld3D`：原点=地球中心 · 中心反平方引力 + N 体 + 数学规律层） |
+| 2 | 体空间状态 | \(\phi(t,\mathbf{x})\) 与 \(\{(m_i,\mathbf{r}_i,\mathbf{v}_i)\}\) | `Grid3D` 基类 + `HeatWorld3D` / `WaveWorld3D` / `PoissonWorld3D` / `AdvectDiffuseWorld3D` + `RigidBody3D`（非场物体）+ `RealWorld3D`（原点引力多体 + 几何约束/不变量数学律） |
 | 3 | 全息映射 | \(\Phi_{\text{Holo}}: \phi \mapsto \psi\) | `HoloMap.build()` — POD/SVD 降阶 |
 | 4 | 边界智能层 | \(\mathcal{I}(\psi) \mapsto \psi'\) | `fit_linear()` / `fit_affine()` / **`fit_affine2()`（AR(2)）** + `predict()` / `predict_affine()` / `predict_affine2()` + 灵脑决策核 |
 | 5 | 反向映射 | \(\Phi_{\text{Holo}}^{-1}: \psi' \mapsto \phi'\) | `HoloMap.reconstruct()` |
@@ -187,6 +187,31 @@ Python 的 `np.linalg.lstsq`（SVD）直接解原方程、不平方条件数，�
 `fitLinear` / `fitAffine` / `fitAffine2` 全部改走它。修后两轨声波 AR(2) 逐位一致（8.650e-3），
 热传导 / 对流等其他数字不变。
 
+### 真实世界（原点=地球中心 · 中心引力 + 多体 + 数学规律）
+
+`verify_world.js` / `verify_world.py`：把"三维虚拟空间"升级为更接近真实世界的系统，且**显式把物理规律与数学规律分成两层**（物理只是其中一层，不是全部）。
+
+- **物理层（现实规律，含运动）**：以世界原点 \((0,0,0)\) 模拟为地球中心，从原点产生反平方中心引力
+  \(F=-GMm\,\hat r/r^2\)（fail-closed 奇点护栏：物体距原点 \(<r_{\min}\) 直接拒绝启动）；可选物体间互引力（N 体）；可选弹性碰撞（现实规律的相互作用）。积分器用**速度 Verlet**（辛，长期能量有界振荡而非单调发散）。
+- **数学层（数学规律，区别于物理力）**：
+  - **MG 几何约束律**：物体被约束在给定半径的球面上（纯数学结构，非力，每步把位置投影回球面、速度切向化）。
+  - **MI 不变量律**：能量（时间平移对称）、角动量（SO(3) 旋转对称）、动量（平移对称）三大守恒量由连续对称推出，验真时显式测其漂移作为"数学规律在生效"的证据。
+  - **Bertrand 专属数学律**：反平方中心力下离心率矢量 \(\mathbf e\) 守恒 \(\Rightarrow\) 所有束缚轨道必闭合成椭圆（Bertrand 定理）。
+
+| 验真 | 物理/数学 | 关键结论（JS / Python 双轨） |
+| :--- | :--- | :--- |
+| G1 近圆轨道 | 物理 + MI | 5 圈能量漂移 **2.500e-7%**；角动量 \|L\| 漂移 ~1e-12 |
+| G2 椭圆轨道 | 数学(Bertrand) | vis-viva 算 \(a=7.3529\)，实测 \(a\approx7.3534\)；\|e_vec\| 2 周期漂移 **7.16e-2%**（守恒 ⇒ 闭合成椭圆） |
+| G3 中心+双卫星 | 物理 + MI | 3000 步能量漂移 1.585e-7%；总角动量矢量(方向+大小)漂移 ~1e-12 |
+| G4 球面几何约束律 | 数学(MG) | 200 步后 max\|r−R\|~1e-15、max\|径向速度\|~1e-16（逐位满足；不守恒物理能量，诚实） |
+| G5 孤立 N 体 | 数学(MI) | 4000 步能量漂移 9.890e-7%；角动量/动量漂移 ~1e-12（三大对称→三守恒） |
+| G6 弹性碰撞 | 物理(现实规律) | 对撞后总动量、总动能漂移 **0**（等质量正碰反向） |
+| G7 奇点护栏 | 物理 fail-closed | r=0.1<r_min=0.5 直接拒绝启动 |
+
+**核心教训：物理规律只是一层，数学规律是另一层。** 中心引力、互引力、碰撞是"力→运动"（物理层）；
+球面几何约束、守恒不变量、Bertrand 闭合椭圆是"结构/对称的必然结论"（数学层），二者可被同一套验真
+逐位交叉验证——这正是灵境"物理想象力引擎"要同时承载的两类规律。
+
 ---
 
 ## 五、诚实边界（请务必读）
@@ -246,14 +271,16 @@ Python 版 `HeatWorld.init()` 立即施加 Dirichlet 边界；JS 版 `init()` �
 
 | 文件 | 说明 |
 | :--- | :--- |
-| `lingjing_rom.py` | 五层核心数学（Python / NumPy 版，唯一第三方依赖 numpy）；含 `Grid3D` + 四类场 PDE + `RigidBody3D` + `fit_affine2` |
+| `lingjing_rom.py` | 五层核心数学（Python / NumPy 版，唯一第三方依赖 numpy）；含 `Grid3D` + 四类场 PDE + `RigidBody3D` + `RealWorld3D`（原点引力多体 + 数学规律层）+ `fit_affine2` |
 | `verify.py` | Python 验真：五层 + 篡改检测 + 规模扩展 |
-| `rom.js` | 五层核心数学（JS 版，UMD）；含四类场 PDE + `fitAffine` / `fitAffine2` / `lstsq`（Householder QR 稳定最小二乘） |
+| `rom.js` | 五层核心数学（JS 版，UMD）；含四类场 PDE + `RealWorld3D` + `fitAffine` / `fitAffine2` / `lstsq`（Householder QR 稳定最小二乘） |
 | `verify.js` | Node 验真（2D） |
 | `verify3d.js` | Node 验真（三维世界坐标，21³=9261，含坐标系自检 11 项） |
 | `verify3d.py` | Python 验真（三维，与 JS 逐项对照） |
 | `verify_physics.js` | Node 验真：四类场 PDE + 刚体（五类物理 A–E + CFL 护栏 F） |
 | `verify_physics.py` | Python 验真：多物理，与 JS 逐项对照 |
+| `verify_world.js` | Node 验真：真实世界（中心引力 + N 体 + 几何约束律/不变量律/Bertrand 律，G1–G7） |
+| `verify_world.py` | Python 验真：真实世界，与 JS 逐项对照 |
 | `index.html` | 浏览器演示（2D）：真场 / 重建场 / 预演场三视图 + 五层状态 + 审计账本 |
 | `sim3d.html` | 浏览器演示（**三维世界坐标 + 多物理切换**）：原点 (0,0,0) 在正中心、XYZ 分正负；9 个 z 切片（−8…+8）× 真实场 / POD 重建 / 边界纯预测三行对照；下拉切换热传导 / 声波 / 流体输运 |
 | `lingnao-decision.js` | 灵脑风格可审计决策核（哈希链 + FIREWALL + fail-closed） |
@@ -277,6 +304,8 @@ Python 版 `HeatWorld.init()` 立即施加 Dirichlet 边界；JS 版 `init()` �
 - [x] 扩展到三维 \(\mathcal{M}_{3,1}\)——**已落**：`HeatWorld3D` 双轨 + `verify3d.*` 验真（21³=9261，世界坐标系原点居中、XYZ 分正负）
 - [x] 三维可视化——**已落**：`sim3d.html`（9 个 z 切片三行对照，世界坐标轴图示）
 - [x] 接入多种物理规律——**已落**：四类场 PDE（热传导 / 声波 / 静电势 / 流体输运）+ 刚体，`verify_physics.*` 双轨验真
+- [x] 真实世界 + 数学规律层——**已落**：`RealWorld3D`（原点=地球中心 · 中心反平方引力 + N 体 + 弹性碰撞）+ 显式"物理层/数学层"分置 + 几何约束律(MG)/不变量律(MI)/Bertrand 律，`verify_world.*` 双轨验真（G1–G7）
+- [ ] 真实世界粒子可视化（`world3d.html`：中心引力下多体轨道 + 球面几何约束律可视化）——核心+验真已落，可视化待做
 - [ ] 多物理之间的耦合（多场耦合，如热对流、磁流体）
 - [ ] 弹性 / 电磁 PDE
 - [ ] 接入完整灵脑内核（八元组、M1–M4 证明模块、SHA-256+HMAC 单写者账本）
