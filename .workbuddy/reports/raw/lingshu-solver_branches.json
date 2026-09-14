@@ -1,0 +1,23 @@
+[
+  {
+    "name": "master",
+    "commit": {
+      "sha": "bfdbda3accafcad6e218fc8044d924b1ca038481",
+      "url": "https://api.github.com/repos/genesis-plan/lingshu-solver/commits/bfdbda3accafcad6e218fc8044d924b1ca038481"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/genesis-plan/lingshu-solver/branches/master/protection"
+  }
+]

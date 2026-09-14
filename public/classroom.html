@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>灵境·课室 — 一进来就在教室里</title>
+<style>
+  /* ===================================================================
+     灵境·课室（图片实景版）
+
+     ① 为什么不用 Three.js/WebGL：预览面板里常画不出来（黑屏/闪），
+        且程序化几何体做出来的是几个黑方块，不像教室。
+        现在＝真实民国教室照片做底 + 前景课桌遮挡层 + 学生立绘分层，
+        全部普通 DOM/CSS，无 WebGL、无 rAF 循环 → 任何环境都稳定显示。
+
+     ② 界面原则（用户 2026-09-10 拍板）：**这是给人体验的，不是给人查数据的。**
+        课堂现场只出现人能一眼懂的东西——学生头顶写"有点明白"而不是"53%"，
+        状态条说"他们问完了·该你了"而不是"第2轮结束·0/5走真LLM"。
+        所有内部指标（R̄/σ²/H/轮次/完整度/V(s)/落盘路径/LLM 技术细节）
+        一律收进下课后的「课堂数据」抽屉，默认不展开。数据一个没删。
+     =================================================================== */
+  :root{
+    --wood:#3a2a18; --wood2:#241a0f; --ink:#f2e7cf; --gold:#d8b46a; --seal:#8a2b1e;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; overflow:hidden; background:#0d0906;
+    font-family:-apple-system,"PingFang SC","Microsoft YaHei","Segoe UI",sans-serif;
+    color:var(--ink); -webkit-font-smoothing:antialiased; }
+  .kai{ font-family:"KaiTi","STKaiti","Kaiti SC","楷体",serif; }
+
+  /* ---------- 舞台：底图 + 学生 + 前景遮挡 ---------- */
+  #stage{ position:fixed; inset:0; overflow:hidden; background:#0d0906; }
+  #stage img{ position:absolute; display:block; }
+  #cover{ left:0; top:0; width:100%; height:100%; object-fit:cover; }
+  /* 前景层：最前排课桌+讲台，盖在学生之上 → 学生是"坐在课桌后面"，不是浮在桌子前面。
+     初始透明，等 layout() 算好位置再显形 —— 避免首帧被拉伸造成的闪一下。 */
+  #fg{ left:0; top:0; opacity:0; transition:opacity .28s; }
+  #cast{ position:absolute; inset:0; }
+  #grade{ position:absolute; inset:0; pointer-events:none;
+    background:
+      radial-gradient(120% 90% at 50% 42%, rgba(255,214,150,.10), transparent 58%),
+      radial-gradient(140% 120% at 50% 50%, transparent 45%, rgba(8,5,3,.62) 100%);
+  }
+
+  /* ---------- 学生 ---------- */
+  .stu{ position:absolute; transform:translateX(-50%); }
+  .stu .fig{ display:block; height:100%; width:auto; will-change:transform;
+    filter:brightness(.95) saturate(.92) contrast(1.04) drop-shadow(0 8px 14px rgba(0,0,0,.5));
+    animation:bob 7s ease-in-out infinite; transform-origin:50% 100%; }
+  @keyframes bob{ 0%,100%{ transform:translateY(0) } 50%{ transform:translateY(-.55%) } }
+  .stu.speaking .fig{ animation:none; transform:scale(1.045) translateY(-1.5%); filter:brightness(1.06) saturate(1.02)
+      drop-shadow(0 10px 20px rgba(0,0,0,.55)); transition:transform .25s, filter .25s; }
+  .stu.thinking .fig{ filter:brightness(.88) saturate(.8) contrast(1.04) drop-shadow(0 8px 14px rgba(0,0,0,.5)); }
+
+  /* 名签 + 状态（写人话，不写百分比） */
+  .stu .tag{ position:absolute; left:50%; transform:translateX(-50%); bottom:calc(100% + 7px);
+    display:flex; align-items:center; gap:7px; white-space:nowrap;
+    background:linear-gradient(180deg, rgba(58,42,24,.94), rgba(30,21,12,.94));
+    border:1px solid rgba(216,180,106,.42); border-radius:8px; padding:4px 9px;
+    box-shadow:0 6px 16px rgba(0,0,0,.5); }
+  .stu .tag .nm{ font-size:14px; font-weight:700; color:#f6ecd6; letter-spacing:1px; }
+
+  /* 对话泡：窄一点、压低一点、最多 2 行前概念 —— 5 个人同时说话时才不会糊成一堵墙 */
+  .stu .bub{ position:absolute; left:50%; transform:translateX(-50%) translateY(4px);
+    bottom:calc(100% + 30px); width:min(196px,21vw);
+    background:rgba(250,246,236,.97); color:#241f18; border-radius:11px; padding:7px 10px;
+    font-size:12px; line-height:1.55; font-weight:600; box-shadow:0 8px 22px rgba(0,0,0,.55);
+    opacity:0; transition:opacity .22s, transform .22s; pointer-events:none; }
+  .stu .bub.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+  .stu .bub .mis{ display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
+    margin-top:4px; font-weight:400; font-size:10.5px; line-height:1.45; color:#8a6a3a;
+    border-top:1px dashed #ddd2b8; padding-top:3px; }
+
+  /* ---------- 顶部：课题木匾 + 一句话状态 ---------- */
+  #board{ position:absolute; top:14px; left:50%; transform:translateX(-50%); text-align:center; pointer-events:none; }
+  #board .plaque{ display:inline-block; padding:6px 26px; border-radius:8px;
+    background:linear-gradient(180deg,#7a1f1a,#5e140f); border:2px solid #b08c4a;
+    box-shadow:0 8px 22px rgba(0,0,0,.55); }
+  #board .t{ font-size:21px; font-weight:700; letter-spacing:5px; color:#f6e6bd; }
+  #board .sub{ margin-top:5px; font-size:11.5px; color:#d8c8a4; text-shadow:0 2px 8px #000; }
+  #status{ position:absolute; top:16px; left:16px; max-width:min(430px,42vw); font-size:12.5px; line-height:1.6;
+    color:#e8d9b5; background:rgba(20,14,8,.78); border:1px solid rgba(255,235,190,.2);
+    border-radius:9px; padding:7px 12px; pointer-events:none; }
+  /* 左上角只留"这节课是什么状态"的一句话，右上角只留一个很小的模式角标（诚实但不吵） */
+  #mode{ position:absolute; top:16px; right:16px; font-size:11px; color:#b9a884;
+    background:rgba(20,14,8,.7); border:1px solid rgba(255,235,190,.14);
+    border-radius:20px; padding:4px 11px; pointer-events:none; max-width:min(280px,34vw);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+  /* ---------- 底部讲台条（就是讲台，不是对话框） ---------- */
+  #podium{ position:absolute; left:50%; bottom:14px; transform:translateX(-50%); width:min(940px,94vw); }
+  #podium .plank{ display:flex; gap:8px; align-items:center; flex-wrap:wrap;
+    background:linear-gradient(180deg, rgba(46,33,19,.96), rgba(24,17,9,.97));
+    border:1px solid rgba(216,180,106,.35); border-radius:13px; padding:9px 11px;
+    box-shadow:0 14px 34px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,225,170,.14); }
+  #podium .who{ font-size:12.5px; color:var(--gold); white-space:nowrap; padding-left:3px; }
+  #podium input{ flex:1; min-width:130px; background:#120d07; border:1px solid rgba(216,180,106,.3);
+    color:#f5ead3; border-radius:9px; padding:9px 11px; font-size:14px; font-family:inherit; }
+  #podium input:focus{ outline:none; border-color:var(--gold); }
+  #podium button{ border:0; border-radius:9px; padding:9px 16px; font-size:14px; font-weight:700;
+    cursor:pointer; background:linear-gradient(180deg,#9a7742,#7a5c30); color:#fff6e2; }
+  #podium button:disabled{ opacity:.5; cursor:default; }
+  #podium button.g2{ background:transparent; color:#dcc79c; border:1px solid rgba(216,180,106,.45); }
+  #podium .quick{ flex-basis:100%; display:flex; gap:9px; align-items:center; flex-wrap:wrap; padding-top:1px; }
+  #podium .quick i{ font-style:normal; font-size:11px; color:#b9a884; }
+  #podium .quick a{ font-size:12px; color:#e6d6b2; cursor:pointer; border-bottom:1px dashed rgba(230,214,178,.5); }
+  #podium .quick a:hover{ color:#fff3d6; }
+
+  /* 老师刚说的话 */
+  #tsay{ position:absolute; left:50%; bottom:112px; transform:translateX(-50%); max-width:min(720px,90vw);
+    text-align:center; background:rgba(20,14,8,.86); border:1px solid rgba(255,225,170,.26);
+    color:#ffeecb; border-radius:11px; padding:8px 14px; font-size:13.5px; font-weight:600;
+    opacity:0; transition:opacity .3s; pointer-events:none; }
+  #tsay.on{ opacity:1; }
+  #tsay .lbl{ color:var(--gold); }
+
+  /* 上课铃/起立提示 */
+  #cue{ position:absolute; left:50%; top:44%; transform:translate(-50%,-50%); text-align:center;
+    font-size:22px; font-weight:700; letter-spacing:3px; color:#ffe9bd; text-shadow:0 4px 20px #000;
+    opacity:0; transition:opacity .3s; pointer-events:none; }
+  #cue.on{ opacity:1; }
+
+  /* ---------- 作品：《课堂纪要》 ---------- */
+  #work{ position:absolute; inset:0; display:none; align-items:flex-start; justify-content:center;
+    background:rgba(8,6,4,.9); z-index:9; overflow:auto; padding:18px; }
+  #work.on{ display:flex; }
+  #work .scroll{ background:#f7f1e2; color:#241f18; border-radius:6px; padding:22px 24px;
+    width:min(700px,94vw); max-height:calc(100vh - 36px); overflow:auto;
+    box-shadow:0 24px 60px rgba(0,0,0,.65); border:1px solid #d9cfb4; }
+  #work .scroll > h2{ margin:0 0 4px; font-size:20px; }
+  #work .sub{ font-size:12.5px; color:#6b6152; line-height:1.75; margin-bottom:12px; }
+  #work #wkMd{ max-height:44vh; overflow:auto; }   /* 让下面的"你的收获"不用滚到底才能看见 */
+  #work h3{ font-size:15px; margin:15px 0 6px; color:#5a3c1e; border-left:4px solid #b08c4a; padding-left:8px; }
+  #work ul{ margin:0; padding-left:20px; }
+  #work li{ font-size:13px; line-height:1.85; }
+  #work p{ font-size:13px; line-height:1.8; margin:6px 0; }
+  #work blockquote{ margin:8px 0; padding:6px 10px; background:#efe6cf; border-radius:6px; font-size:12px; color:#6b6152; }
+  #work .gains{ margin-top:18px; border-top:1px dashed #d9cfb4; padding-top:12px; }
+  #work .gains > h3{ border-left-color:#7a2c20; color:#7a2c20; }
+  /* 收获：说人话，不摆数字格 */
+  #work .human{ font-size:14px; line-height:2; color:#4a4237; }
+  #work .human b{ color:#7a2c20; font-size:18px; padding:0 2px; }
+  #work .human .fine{ font-size:11.5px; color:#8a7f6a; }
+  #work .blind{ font-size:13px; color:#7a2c20; line-height:1.9; margin-top:10px; }
+  #work .acts{ margin-top:16px; display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  #work button{ background:#8a6a3a; color:#fff8e8; border:0; border-radius:10px; padding:10px 18px;
+    font-size:14px; font-weight:600; cursor:pointer; }
+  #work button.g2{ background:transparent; color:#8a6a3a; border:1px solid #c9b98f; }
+  #work button.g3{ background:transparent; color:#8a7f6a; border:1px solid #ded4bb; font-size:12.5px; padding:8px 14px; }
+  /* 课后抽屉：想深挖的人自己点开，课堂上永不出现 */
+  #work .drawer{ display:none; margin-top:14px; border-top:1px dashed #d9cfb4; padding-top:12px; }
+  #work .drawer.on{ display:block; }
+  #work .drawer h4{ margin:0 0 7px; font-size:12.5px; color:#5a3c1e; }
+  #work .drawer .row{ font-size:11.5px; color:#5c5344; line-height:1.95;
+    font-family:ui-monospace,Consolas,"Courier New",monospace; word-break:break-all; }
+  #work .drawer .note{ font-size:11.5px; color:#8a7f6a; line-height:1.8; margin-top:9px;
+    border-left:3px solid #e2d8bf; padding-left:9px; }
+
+  #err{ position:absolute; left:50%; bottom:118px; transform:translateX(-50%); z-index:20; display:none;
+    background:#7f1d1d; color:#fff; padding:9px 14px; border-radius:9px; font-size:13px; max-width:80vw; }
+  #jserr{ position:fixed; left:8px; bottom:8px; z-index:99; display:none; max-width:60vw;
+    background:#7f1d1d; color:#fff; padding:8px 12px; border-radius:8px; font-size:12px; font-family:monospace; }
+</style>
+</head>
+<body>
+<script>
+window.__ERR=[];
+addEventListener('error',function(e){var d=document.getElementById('jserr');window.__ERR.push(String(e.message));
+  if(d){d.style.display='block';d.textContent='⚠ 运行出错：'+(e.message||e)+' @'+(e.lineno||'')+':'+(e.colno||'');}});
+addEventListener('unhandledrejection',function(e){var d=document.getElementById('jserr');window.__ERR.push(String(e.reason));
+  if(d){d.style.display='block';d.textContent='⚠ 运行出错(rejection)：'+e.reason;}});
+</script>
+
+<div id="stage" data-phase="boot" data-round="">
+  <img id="cover" src="room/classroom.jpg" alt="民国学堂课室" />
+  <div id="cast"></div>
+  <img id="fg" src="room/fg.jpg" alt="" />
+  <div id="grade"></div>
+</div>
+
+<div id="board">
+  <div class="plaque"><div class="t kai" id="boardTitle">灵境 · 课室</div></div>
+  <div class="sub kai" id="boardSub">你站在讲台上 · 5 名学生已在座，等你说第一句话</div>
+</div>
+<div id="status">正在把学生请进教室…</div>
+<div id="mode"></div>
+
+<div id="tsay"><span class="lbl kai">你：</span><span id="tsayText"></span></div>
+<div id="cue" class="kai"></div>
+
+<div id="podium">
+  <div class="plank">
+    <span class="who kai" id="askWho">讲台</span>
+    <input id="sayText" placeholder="今天你想讲什么？把你要教的东西说出来…（回车＝开始上课）" />
+    <button id="sendBtn">开始上课</button>
+    <button id="skipBtn" class="g2" style="display:none">跳过</button>
+    <button id="micBtn" class="g2">🎤 语音讲</button>
+    <span class="quick" id="quick">
+      <i>随手一课：</i>
+      <a data-demo="光合作用::阳光不是植物的「饭」，它只是能量的来源；植物真正吃的是自己用光和水造出来的糖。叶子发黄，多半不是缺肥，而是缺光或水太多。">光合作用</a>
+      <a data-demo="手机摄影::优先用自然光，逆光拍人要让脸转向光源；构图先找线条，再用三分法把主体放在交点上。别用数码变焦，走近一点。">手机摄影</a>
+      <a data-demo="为什么天是蓝的::阳光里有各种颜色，蓝光波长短，被空气分子散射得更厉害，所以从各个方向都进到你眼里；傍晚阳光要穿过更厚的空气，蓝光散没了，剩下红橙。">天为什么蓝</a>
+    </span>
+  </div>
+</div>
+
+<div id="work">
+  <div class="scroll">
+    <h2 class="kai" id="wkTitle">课堂纪要</h2>
+    <div class="sub" id="wkSub"></div>
+    <div id="wkMd"></div>
+    <div class="gains">
+      <h3 class="kai">这一课，你自己的收获</h3>
+      <div class="human" id="wkHuman"></div>
+      <div class="blind" id="wkBlind"></div>
+      <div class="gain" id="wkGain"></div>
+    </div>
+    <div class="acts">
+      <button id="copyMd">复制这份纪要</button>
+      <button id="dlMd" class="g2">下载 .md</button>
+      <button id="dlGain" class="g2">下载我的收获</button>
+      <button id="again" class="g2">再上一课</button>
+      <button id="dataBtn" class="g3">课堂数据 ▾</button>
+    </div>
+    <div class="drawer" id="drawer">
+      <h4 class="kai">这节课的内部数据（给想深挖的人）</h4>
+      <div class="row" id="dRaw"></div>
+      <div class="note" id="dNote"></div>
+    </div>
+  </div>
+</div>
+<div id="err"></div>
+<div id="jserr"></div>
+
+<script type="module">
+// ===== 场景常量：底图尺寸与每个学生的位置（都用"底图归一化坐标"，再换算成像素）=====
+const IMG = { w: 1600, h: 1066 };
+const FG_Y = 0.585;   // 前景遮挡层在底图中的起始比例（最前排课桌的后沿；对齐照片里的桌沿，避免出现一道假横线）
+
+// x=横向中心，y=脚底在底图中的纵向位置，h=立绘高度占底图高度的比例
+// 5 人同坐最前排：坐在真实课桌后面，下半身被前景层挡住（不是浮在桌子前面）。
+const CAST = [
+  { name:'小明', x:0.150, y:0.706, h:0.330 },
+  { name:'小红', x:0.325, y:0.700, h:0.336 },
+  { name:'小刚', x:0.500, y:0.710, h:0.340 },
+  { name:'小丽', x:0.675, y:0.701, h:0.332 },
+  { name:'小华', x:0.850, y:0.705, h:0.334 },
+];
+const FIG = { '小明':'students/xiaoming.png','小红':'students/xiaohong.png','小刚':'students/xiaogang.png',
+              '小丽':'students/xiaoli.png','小华':'students/xiaohua.png' };
+const FALLBACK_ROSTER = [
+  { name:'小明', trait:'好奇型' }, { name:'小红', trait:'严谨型' }, { name:'小刚', trait:'活泼型' },
+  { name:'小丽', trait:'害羞型' }, { name:'小华', trait:'自信型' },
+];
+
+const $ = (id) => document.getElementById(id);
+const stage = $('stage'), cover = $('cover'), fg = $('fg'), castLayer = $('cast');
+const els = {};          // name -> { root, fig, bub, mis }
+
+// ---------- 布局：把底图按 cover 铺满，再据此摆放前景层与学生（不留 rAF 循环，只算一次） ----------
+function box(){
+  const cw = stage.clientWidth, ch = stage.clientHeight;
+  const s = Math.max(cw / IMG.w, ch / IMG.h);
+  const dw = IMG.w * s, dh = IMG.h * s;
+  return { dw, dh, ox: (cw - dw) / 2, oy: (ch - dh) / 2 };
+}
+function layout(){
+  const { dw, dh, ox, oy } = box();
+  // 前景层与底图共用同一套 cover 映射 → 遮挡边界与照片里的桌沿严格对齐
+  fg.style.left = ox + 'px'; fg.style.width = dw + 'px';
+  fg.style.top = (oy + FG_Y * dh) + 'px'; fg.style.height = ((1 - FG_Y) * dh) + 'px';
+  fg.style.opacity = '1';
+  for (const c of CAST){
+    const el = els[c.name]; if (!el) continue;
+    el.root.style.left = (ox + c.x * dw) + 'px';
+    el.root.style.top = (oy + (c.y - c.h) * dh) + 'px';
+    el.root.style.height = (c.h * dh) + 'px';
+  }
+}
+addEventListener('resize', layout);
+
+// ---------- 建学生（一打开页面就摆进教室，不需要点"开始"） ----------
+function buildCast(list){
+  castLayer.innerHTML = ''; for (const k in els) delete els[k];
+  const meta = {}; (list || []).forEach((s) => (meta[s.name] = s));
+  for (const c of CAST){
+    const s = meta[c.name] || {};
+    const root = document.createElement('div');
+    root.className = 'stu';
+    root.innerHTML =
+      '<div class="bub"></div>' +
+      '<div class="tag"><span class="nm kai"></span></div>' +
+      '<img class="fig" alt="" />';
+    root.querySelector('.nm').textContent = c.name + (s.trait ? ' · ' + String(s.trait).replace(/型$/, '') : '');
+    const figEl = root.querySelector('.fig');
+    figEl.src = FIG[c.name] || '';
+    figEl.style.animationDelay = (-(CAST.indexOf(c) * 1.37)).toFixed(2) + 's';   // 各自错开，免得整齐地一起晃（像机器）
+    castLayer.appendChild(root);
+    els[c.name] = { root, fig: root.querySelector('.fig'), bub: root.querySelector('.bub'),
+                    mis: s.mis || '' };
+  }
+  layout();
+}
+
+// ===== 学生头顶：只显示"在想 / 在说"，不显示任何"理解度"数字 =====
+// ⚠️ 2026-09-11：原来头顶有条进度条（先是自评理解度 R，后是"被接住程度"），
+//   两版都来自假理论（模型采样自评 / 2-gram 噪声判定），已删除。学生就是镜子，不给他打分。
+function speak(name, on){ const e = els[name]; if (!e) return; e.root.classList.toggle('speaking', !!on); }
+function think(name, on){ const e = els[name]; if (!e) return; e.root.classList.toggle('thinking', !!on); }
+function bubble(name, text, mis){
+  const e = els[name]; if (!e) return;
+  let html = escapeHtml(text || '（未发言）');
+  if (mis) html += '<span class="mis">他进课堂前以为：' + escapeHtml(mis) + '</span>';
+  e.bub.innerHTML = html;
+  e.bub.classList.add('show');
+  clearTimeout(e._t); e._t = setTimeout(() => e.bub.classList.remove('show'), 7000);
+}
+function escapeHtml(s){ return String(s == null ? '' : s).replace(/[&<>]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;' }[c])); }
+function cue(text, ms){ const el = $('cue'); el.textContent = text; el.classList.add('on');
+  clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove('on'), ms || 1900); }
+// 老师刚说的话：剥掉"课题::"这种输入格式，太长就截断（否则屏幕上会出现原始格式符）
+function teacherSay(t){
+  let s = String(t || '');
+  if (s.includes('::')) s = s.split('::').slice(1).join('::').trim();
+  if (s.length > 46) s = s.slice(0, 46) + '…';
+  $('tsayText').textContent = s;
+  const el = $('tsay'); el.classList.add('on');
+  clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove('on'), 6500);
+}
+function showErr(m){ const e = $('err'); e.textContent = m; e.style.display = 'block';
+  clearTimeout(e._t); e._t = setTimeout(() => (e.style.display = 'none'), 6500); }
+
+// 上课铃（WebAudio 合成，零素材；失败静默降级）
+let actx = null;
+function bell(){
+  try{
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    if (actx.state === 'suspended') actx.resume();
+    const t0 = actx.currentTime;
+    [[660,0],[880,.18],[660,.36],[880,.54]].forEach(([f,dt]) => {
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.frequency.value = f; o.type = 'sine';
+      g.gain.setValueAtTime(.0001, t0 + dt);
+      g.gain.exponentialRampToValueAtTime(.22, t0 + dt + .02);
+      g.gain.exponentialRampToValueAtTime(.0001, t0 + dt + .16);
+      o.connect(g); g.connect(actx.destination); o.start(t0 + dt); o.stop(t0 + dt + .18);
+    });
+  }catch(e){}
+}
+
+// ===== 状态机：idle(课前) → busy(学生说话) → reply(等你回话) → done(作品) =====
+// phase 同时写进 #stage 的 data-phase / data-round，供自动化测试读取
+// （测试绝不该去猜界面文案 —— 文案是给人看的，随时会改）
+let sessionId = null, phase = 'idle', finishing = false, lastWork = null, lastGainMd = '', llmInfo = null;
+const transcript = [];
+const sayText = $('sayText');
+function setPhase(p){ phase = p; stage.dataset.phase = p; }
+
+function setBar(mode){
+  if (mode === 'hide'){ $('podium').style.display = 'none'; return; }
+  $('podium').style.display = '';
+  $('quick').style.display = (mode === 'idle') ? 'flex' : 'none';
+  $('skipBtn').style.display = (mode === 'idle') ? 'none' : '';
+  if (mode === 'idle'){
+    $('askWho').textContent = '讲台';
+    sayText.placeholder = '今天你想讲什么？把你要教的东西说出来…（回车＝开始上课）';
+    $('sendBtn').textContent = '开始上课';
+  } else {
+    $('askWho').textContent = '你：';
+    sayText.placeholder = '学生问完了 · 你说两句（回答／追问／接着讲；留空＝跳过，让他们自己再想想）';
+    $('sendBtn').textContent = '回答';
+  }
+  sayText.value = '';
+}
+function setBusy(b){ $('sendBtn').disabled = b; sayText.disabled = b; }
+
+// ---- 《课堂纪要》Markdown 渲染（自写极简，避免引第三方库） ----
+function mdToHtml(md){
+  const inline = (s) => escapeHtml(s).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/`(.+?)`/g, '<code>$1</code>');
+  let out = '', inUl = false;
+  const closeUl = () => { if (inUl){ out += '</ul>'; inUl = false; } };
+  for (const raw of String(md || '').split('\n')){
+    const l = raw.replace(/\s+$/, '');
+    if (/^#{1,3}\s+/.test(l)){ closeUl(); out += '<h3 class="kai">' + inline(l.replace(/^#{1,3}\s+/, '')) + '</h3>'; continue; }
+    if (/^>\s?/.test(l)){ closeUl(); out += '<blockquote>' + inline(l.replace(/^>\s?/, '')) + '</blockquote>'; continue; }
+    if (/^[-*]\s+/.test(l)){ if (!inUl){ out += '<ul>'; inUl = true; } out += '<li>' + inline(l.replace(/^[-*]\s+/, '')) + '</li>'; continue; }
+    if (!l){ closeUl(); continue; }
+    closeUl(); out += '<p>' + inline(l) + '</p>';
+  }
+  closeUl(); return out;
+}
+// LLM 状态：人话版（右上角小角标），技术细节进抽屉。
+// 诚实底线不变：没实测过就不许宣称"真 AI 学生在场"——用"预演台词"如实说清楚。
+function modeText(llm){
+  switch ((llm || {}).state){
+    case 'verified':     return '真 AI 学生在场';
+    case 'unverified':   return 'AI 学生已就位（首次回话后才确定连线可用）';
+    case 'no-key':       return '预演模式 · 学生说的是预演台词';
+    case 'circuit-open': return '预演模式 · AI 额度用完，学生说预演台词';
+    default:             return (llm && llm.usable) ? 'AI 学生可用' : 'AI 学生状态未知';
+  }
+}
+function modeDetail(llm){
+  switch ((llm || {}).state){
+    case 'verified':     return 'llm=verified · 真 LLM 学生在场' + (llm.model ? ' · ' + llm.model : '');
+    case 'unverified':   return 'llm=unverified · 已配置 key，未实测';
+    case 'no-key':       return 'llm=no-key · 未配置 LINGJING_OR_KEY，学生走确定性兜底语料';
+    case 'circuit-open': return 'llm=circuit-open · ' + ((llm && llm.reason) || '额度/限流熔断中') + '，学生走确定性兜底语料';
+    default:             return 'llm=unknown';
+  }
+}
+// 角标在开课时只能读到"还没打过电话"的状态（unverified）。等课堂真的跑过几轮，
+// 我们才**知道**AI 到底通没通 —— 这时必须把角标改过来，否则就是在骗人。
+// （2026-09-10：实测额度用尽时角标一直显示"首次回话后才确定"，与事实不符。）
+function setModeBadge(llm){
+  llmInfo = llm || llmInfo;
+  const m = $('mode'); if (!m || !llmInfo) return;
+  m.textContent = modeText(llmInfo);
+  m.title = modeDetail(llmInfo);
+  if (lastDoneEv) fillDrawer(lastDoneEv);   // 抽屉里那句"AI 学生状态"也要跟着校准
+}
+let modeRefreshing = false;
+async function refreshMode(){
+  if (modeRefreshing) return;
+  // 已经是终态（真通了 / 明确不可用）就不用再问
+  if (llmInfo && (llmInfo.state === 'verified' || llmInfo.state === 'no-key' || llmInfo.state === 'circuit-open')) return;
+  modeRefreshing = true;
+  try{ const r = await (await fetch('/api/roster')).json(); setModeBadge(r && r.llm); }catch(e){}
+  finally{ modeRefreshing = false; }
+}
+
+// 抽屉内容（抽成函数：角标校准后要能重填一次，否则抽屉里会留着一个过期的"AI 学生状态"）
+let lastDoneEv = null;
+function fillDrawer(ev){
+  const g = ev.gains || {}, m = ev.minutes || {};
+  const nStu = (ev.students || []).length || 5;
+  const nRound = (ev.rounds || []).length;
+  const llmOk = (typeof ev.llmOk === 'number') ? ev.llmOk : (ev.usedLLM ? nStu : 0);
+  // 学生发言来源要按**实际原因**说，不许一律报"额度/限流"（没配 key 和额度用完是两回事）
+  let src;
+  if (ev.usedLLM) src = '真 LLM 学生 ' + llmOk + '/' + nStu;
+  else if (llmInfo && llmInfo.state === 'no-key') src = '未配置 AI 学生（缺 LINGJING_OR_KEY）· 全部走本地预演台词';
+  else if (llmInfo && llmInfo.state === 'circuit-open') src = '真 LLM 未接通（' + ((llmInfo && llmInfo.reason) || '额度/限流') + '）· 全部走本地预演台词';
+  else src = '真 LLM 学生 0/' + nStu + '（本次调用全部失败或返回空）· 全部走本地预演台词';
+  // ⚠️ 2026-09-11：原来这里印的是 R̄ / σ² / H / 讲解完整度——源头都是学生的**自评理解度**
+  //   （模型采样出的一个数，不是观测）。已全部删除。现在只印数得出来的事实：
+  //   学生抛出几枚探测、你回了几枚、还欠几枚。机器只数词，不下"答到没"的结论。
+  $('dRaw').innerHTML =
+    '轮次 ' + nRound + '<br>'
+    + '学生抛出的探测 ' + (g.probes != null ? g.probes : '–')
+      + (g.probeLine ? '（' + escapeHtml(g.probeLine) + '）' : '')
+      + ' · 你回了 ' + (g.answered != null ? g.answered : '–') + ' 枚'
+      + (g.open != null ? ' · 还有 ' + g.open + ' 枚没回' : '') + '<br>'
+    + '讲出的要点 ' + g.points + ' · 回答轮次 ' + g.replies
+      + ' · 澄清型回答 ' + g.clarifying + '/' + g.replies
+      + ' · 参与度 V(s)=' + Number(ev.V || 0).toFixed(3) + '<br>'
+    + '纪要走笔：' + (m.by || '—') + '<br>'
+    + '学生发言来源：' + src + '<br>'
+    + 'AI 学生状态：' + (llmInfo ? modeDetail(llmInfo) : '未知') + '<br>'
+    + '纪要落盘：' + (m.path ? m.path : (m.error ? ('落盘异常：' + m.error) : '—');
+  $('dNote').textContent = '「答到没」由你课后逐条对着清单自己判——机器只数你回了几枚、欠几枚，不替你下结论。'
+    + '这一页的数据是给想深挖的人看的，课堂上不出现。';
+}
+function renderWork(ev){
+  const g = ev.gains || {}, m = ev.minutes || {};
+  const title = ev.lessonTitle || '这一课';
+  const nStu = (ev.students || []).length || 5;
+  const nRound = (ev.rounds || []).length;
+  $('wkTitle').textContent = '《' + title + '》课堂纪要';
+  // 开场白说人话：不写"共3轮·平均R̄=0.19·兜底语料"
+  $('wkSub').textContent = '今天你讲了 ' + nRound + ' 回；' + nStu
+    + ' 个学生把听到的、原来想的、明白的和还没明白的，都写下来了。';
+
+  // 纪要正文自带一级标题，面板标题已经有了 → 去掉，免得同一句话出现两次
+  const body = String(m.md || '').replace(/^\s*#\s+.*(\r?\n)+/, '');
+  $('wkMd').innerHTML = mdToHtml(body || m.md || '（本次没有生成纪要）');
+
+  // —— 收获：一句话，不摆数字格 ——
+  // ⚠️ 2026-09-11：原来写的是"学生在 N 处松了口"——"松口"暗指学生懂了，而我们不可能知道。
+  //   改成数得出来的事：学生一共问出几枚探测、你回了几枚、还欠几枚（"答到没"由你课后自己判）。
+  $('wkHuman').innerHTML =
+    '你讲出了 <b>' + (g.points != null ? g.points : '–') + '</b> 件事；学生一共抛出 <b>'
+      + (g.probes != null ? g.probes : '–') + '</b> 枚探测'
+      + (g.probeLine ? '（' + escapeHtml(g.probeLine) + '）' : '')
+      + '，你回了 <b>' + (g.answered != null ? g.answered : '–') + '</b> 枚'
+      + (g.open != null ? '，还有 <b>' + g.open + '</b> 枚没回' : '')
+      + '。'
+    + '<br><span class="fine">（"答到没"由你课后逐条对着清单自己判——下面写的是学生自己的话，不是给你打分。）</span>';
+
+  const openN = (g.open != null ? g.open : 0);
+  $('wkBlind').innerHTML = openN
+    ? '<b>还有 ' + openN + ' 枚探测你没回 —— 这份纪要里最值钱的就是这几条：它们标出了你这次没说到的地方（逐条见下方「他问的 / 你答的」）。</b>'
+    : '这一课没有悬着没回的探测。但这不等于他们全懂了，只说明你这次把话正好说到他们的疑问上了。';
+
+  // —— 教中学：教师的"我的收获"报告（人话，四节：讲清了/盲区/术语带过/费曼下一步）——
+  // 这是需求⑥的核心交付物——让使用者从讲授中获得"属于自己的东西"。只进课后面板，不进体验层。
+  $('wkGain').innerHTML = mdToHtml(String(ev.teacherReportMd || '').replace(/^\s*#\s+.*(\r?\n)+/, '') || '<p class="fine">（本次没有生成你的收获报告）</p>');
+  lastGainMd = ev.teacherReportMd || '';
+
+  // —— 抽屉：内部数据一个不删，但要主动点开才看见 ——
+  lastDoneEv = ev;
+  fillDrawer(ev);
+  $('drawer').classList.remove('on');
+  $('dataBtn').textContent = '课堂数据 ▾';
+
+  lastWork = { title, md: m.md || '' };
+  $('work').classList.add('on');
+}
+
+function handleEvent(ev){
+  if (ev.type === 'session'){ sessionId = ev.id; return; }
+  if (ev.type === 'start'){
+    $('boardTitle').textContent = '《' + (ev.lessonTitle || '课室') + '》';
+    $('boardSub').textContent = '你站在讲台上 · 学生带着各自的旧想法进了课堂';
+    if (ev.students && ev.students.length){
+      const meta = {}; ev.students.forEach((s) => (meta[s.name] = s));
+      for (const c of CAST){
+        const e = els[c.name]; if (!e) continue;
+        e.mis = (meta[c.name] && meta[c.name].mis) || '';
+        e.root.querySelector('.nm').textContent = c.name + ((meta[c.name] && meta[c.name].trait) ? ' · ' + String(meta[c.name].trait).replace(/型$/, '') : '');
+      }
+    }
+    transcript.length = 0; lastWork = null;
+    stage.dataset.round = '1';
+    bell(); cue('🔔 上课铃响了 · 全体起立：老师好！');
+    setTimeout(() => cue('', 10), 1700);
+    return;
+  }
+  if (ev.type === 'round_start'){
+    CAST.forEach((c) => { think(c.name, false); });
+    if (ev.teacherReply) teacherSay(ev.teacherReply);
+    stage.dataset.round = String(ev.round || '');
+    // LLM 在跑的时候讲台条是隐藏的，这里给个明确反馈，免得老师以为卡住了
+    $('status').textContent = '学生们在交头接耳…';
+    setBar('hide');
+    return;
+  }
+  // （understand 事件已删除：它带的是学生自评理解度 R 的假数，服务端不再发；学生头顶不再有理解度进度条）
+  if (ev.type === 'ask'){
+    think(ev.name, false);
+    const e = els[ev.name];
+    speak(ev.name, true); setTimeout(() => speak(ev.name, false), 1600);
+    bubble(ev.name, ev.text, (e && e.mis) || '');
+    transcript.push(ev.name + '：' + ev.text);
+    return;
+  }
+  if (ev.type === 'round_end'){
+    // 这一轮 AI 一个都没答上（额度/限流/返回空）→ 去问一次服务端真实状态，把角标改诚实
+    if (typeof ev.llmOk === 'number' && ev.llmOk === 0) refreshMode();
+    if (ev.canContinue){
+      $('status').textContent = '他们问完了 · 该你了';
+      setPhase('reply'); setBar('reply'); setBusy(false); setTimeout(() => sayText.focus(), 80);
+    } else finishClass();
+    return;
+  }
+  if (ev.type === 'done'){
+    setPhase('done'); stage.dataset.round = '';
+    refreshMode();                       // 下课后再校准一次角标与抽屉里的"AI 学生状态"
+    $('status').textContent = '下课了 · 他们已经把纪要写好';
+    setBar('hide'); setBusy(false);
+    renderWork(ev);
+    return;
+  }
+  if (ev.type === 'error'){
+    showErr('出错了：' + ev.message); setBusy(false);
+    if (phase === 'busy'){ setPhase('reply'); setBar('reply'); }
+  }
+}
+
+async function streamClass(url, body){
+  const resp = await fetch(url, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(body) });
+  if (!resp.ok || !resp.body) throw new Error('HTTP ' + resp.status);
+  const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = '';
+  for (;;){
+    const { done, value } = await reader.read(); if (done) break;
+    buf += dec.decode(value, { stream:true });
+    let i;
+    while ((i = buf.indexOf('\n\n')) >= 0){
+      const chunk = buf.slice(0, i); buf = buf.slice(i + 2);
+      const line = chunk.split('\n').find((l) => l.startsWith('data: '));
+      if (line) handleEvent(JSON.parse(line.slice(6)));
+    }
+  }
+}
+async function startClass(text){
+  if (phase === 'busy' || !text) return;
+  setPhase('busy'); setBusy(true); $('err').style.display = 'none';
+  $('work').classList.remove('on'); $('quick').style.display = 'none';
+  teacherSay(text); transcript.push('你：' + text);
+  try{ await streamClass('/api/class/start', { lesson: text }); }
+  catch(e){ showErr('出错了：' + (e.message || e)); }
+  finally{ setBusy(false); if (phase === 'busy') setPhase('idle'); }
+}
+async function tellStudents(text){
+  if (!sessionId || phase === 'busy') return;
+  setPhase('busy'); setBusy(true); setBar('hide');
+  if (text){ transcript.push('你：' + text); teacherSay(text); }
+  try{ await streamClass('/api/class/reply', { id: sessionId, text: text || '' }); }
+  catch(e){ showErr('出错了：' + (e.message || e)); }
+  finally{ setBusy(false); if (phase === 'busy') setPhase('reply'); }
+}
+function finishClass(){
+  if (finishing) return; finishing = true;
+  setBar('hide');
+  if (sessionId) streamClass('/api/class/reply', { id: sessionId, text: '' }).catch(() => {});
+}
+
+// 语音（同一支话筒：课前说课题，课中说回答）
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+if (!SR){ $('micBtn').disabled = true; $('micBtn').title = '当前浏览器不支持语音（请用 Chrome/Edge）'; }
+else {
+  const rec = new SR(); rec.lang = 'zh-CN'; rec.continuous = true; rec.interimResults = false;
+  let on = false;
+  rec.onresult = (e) => { let t = ''; for (let i = e.resultIndex; i < e.results.length; i++) t += e.results[i][0].transcript;
+    sayText.value = (sayText.value ? sayText.value + ' ' : '') + t.trim(); };
+  rec.onerror = () => { $('micBtn').textContent = '🎤 语音讲'; on = false; };
+  rec.onend = () => { on = false; $('micBtn').textContent = '🎤 语音讲'; };
+  $('micBtn').onclick = () => { if (phase === 'busy') return; if (on){ rec.stop(); return; }
+    try{ rec.start(); on = true; $('micBtn').textContent = '⏹ 停止'; }catch(e){} };
+}
+
+function onSend(){
+  const t = sayText.value.trim();
+  if (phase === 'busy' || phase === 'done') return;
+  if (phase === 'idle'){ if (t) startClass(t); return; }
+  tellStudents(t);
+}
+$('sendBtn').onclick = onSend;
+$('skipBtn').onclick = () => { if (phase === 'reply') tellStudents(''); };
+sayText.addEventListener('keydown', (e) => { if (e.key === 'Enter'){ e.preventDefault(); onSend(); } });
+$('quick').addEventListener('click', (e) => {
+  const a = e.target.closest('a[data-demo]'); if (!a || phase !== 'idle') return;
+  const t = a.getAttribute('data-demo') || ''; sayText.value = t; startClass(t);
+});
+$('again').onclick = () => location.reload();
+// 课堂数据抽屉：默认收起，点一下才展开
+$('dataBtn').onclick = () => {
+  const d = $('drawer'), on = d.classList.toggle('on');
+  $('dataBtn').textContent = on ? '课堂数据 ▴' : '课堂数据 ▾';
+};
+$('copyMd').onclick = async () => {
+  if (!lastWork) return;
+  const done = () => { $('copyMd').textContent = '已复制 ✓'; setTimeout(() => ($('copyMd').textContent = '复制这份纪要'), 1800); };
+  try{ await navigator.clipboard.writeText(lastWork.md); done(); }
+  catch(e){
+    const tmp = document.createElement('textarea'); tmp.value = lastWork.md;
+    document.body.appendChild(tmp); tmp.select();
+    try{ document.execCommand('copy'); done(); }catch(e2){ $('copyMd').textContent = '复制失败，请手动选中'; }
+    document.body.removeChild(tmp);
+  }
+};
+$('dlMd').onclick = () => {
+  if (!lastWork) return;
+  const blob = new Blob([lastWork.md], { type:'text/markdown;charset=utf-8' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = '《' + lastWork.title + '》课堂纪要.md'; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+};
+// 教中学：下载教师自己的"我的收获"报告（与学生的纪要分开，是使用者专属的复盘作品）
+$('dlGain').onclick = () => {
+  if (!lastGainMd) return;
+  const blob = new Blob([lastGainMd], { type:'text/markdown;charset=utf-8' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = '《' + (lastWork ? lastWork.title : '这一课') + '》我的收获.md'; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+};
+
+// ===== 打开页面 = 人已经在教室里（先把 5 名学生摆进来，再等老师开口） =====
+async function boot(){
+  setBar('idle');
+  setPhase('idle');
+  try{
+    const r = await (await fetch('/api/roster')).json();
+    setModeBadge(r && r.llm);
+    buildCast((r.students && r.students.length) ? r.students : FALLBACK_ROSTER);
+    $('status').textContent = (r.students && r.students.length)
+      ? (r.students.length + ' 名学生已经坐在课桌后面了 · 说一句你想教的东西，就上课')
+      : '学生已就座 · 说一句你想教的东西，就上课';
+  }catch(e){
+    buildCast(FALLBACK_ROSTER);
+    $('status').textContent = '已经摆好 5 名学生 · 说一句你想教的东西，就上课';
+    $('mode').textContent = '名单读取失败（' + ((e && e.message) || e) + '）';
+  }
+  layout();
+}
+boot();
+// 字体/图片晚到会改变尺寸 → 再校一次版（不是循环，只在加载后触发）
+addEventListener('load', layout);
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(layout);
+</script>
+</body>
+</html>

@@ -35,3 +35,9 @@ synthetic_lerobot.parquet
 .idea/
 .DS_Store
 Thumbs.db
+
+# 课堂纪要产出目录
+sessions/
+# 预览/临时
+.ed
+*.edgeprof

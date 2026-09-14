@@ -1,0 +1,162 @@
+[
+  {
+    "sha": "07c6adbbc0aa31d08d0e370f62abfd8d9c489baa",
+    "node_id": "C_kwDOUOEmbtoAKDA3YzZhZGJiYzBhYTMxZDA4ZDBlMzcwZjYyYWJmZDhkOWM0ODliYWE",
+    "commit": {
+      "author": {
+        "name": "genesis-plan",
+        "email": "553420544@qq.com",
+        "date": "2026-09-04T09:15:16Z"
+      },
+      "committer": {
+        "name": "genesis-plan",
+        "email": "553420544@qq.com",
+        "date": "2026-09-04T09:15:16Z"
+      },
+      "message": "灵境 LingJing 首个提交：五层框架双轨实现（JS + Python/NumPy）\n\n框架：灵境 = <M_{3,1}, E_PDE, B_boundary, Phi_Holo, I_proc>\n  在数字空间中构建的、与真实三维物理世界+时间线严格结构对应的通用虚拟空间。\n  物理想象力引擎，非游戏、非元宇宙。\n\n五层实现：\n  L1/L2 物理底座+体空间  HeatWorld 二维热传导 PDE（FTCS 显式，含 CFL 稳定校验）\n  L3    全息映射         HoloMap POD/SVD 降阶，method of snapshots\n  L4    边界智能层       低维动力学最小二乘拟合 + 多步预测 + 灵脑风格决策核\n  L5    反向映射         reconstruct 回体空间\n\n双轨（参数逐一对齐，数字交叉验证）：\n  JS 版     rom.js / verify.js / index.html（浏览器三视图演示，双击即开）\n  Python 版 lingjing_rom.py / verify.py（LAPACK SVD，N=30000 仅 92ms）\n\n验真数字（两版交叉验证一致）：\n  能量捕获 99.93%/99.94%，压缩比 150:1（N=1200 -> r=8）\n  重建误差 分布内 1.04%/1.04%  分布外 52.79%/52.50%  自适应后 3.25%/2.90%\n  边界动力学拟合 1.23e-8 / 6.87e-11，H=6 预测 7.33e-6 / 7.52e-11\n  灵数解控制分配方程 u1=0.933333 u2=0.266667 certified=true\n\n诚实边界（README 第五节已列明）：\n  MVP 仅热传导一个 PDE；当前 2D+时间 非完整 M_{3,1}\n  ROM 是近似：分布外重建误差可达 ~50%（真实泛化局限，非 bug）\n  能量捕获率须与谱形态同看——新增 effective_rank/cliff_index/spectrum_ratios\n  灵脑决策核为对齐概念的最小真实现，非完整灵脑内核\n  灵数为 JS 实现，Python 侧无对应物，未配置时诚实降级不谎称认证\n\n修复（本次落库前）：\n  lingnao-decision.js VerifyLedger 假绿——旧版 hash 含 Date.now() 却不存时间戳，\n  致 verify() 只能比对 prevHash 链连续，改内容仍返回 true。修后真重算+篡改可检出\n  verify.py 硬编码本机绝对路径改为 LINGSHU_CORE/LINGJING_NODE 环境变量\n  verify.py 子进程调 node -e 时 argv 索引错位一格（-e 不占 argv[1]）\n\n许可：待版权方拍板，默认保留所有权利",
+      "tree": {
+        "sha": "533fa542d5cef6eec95cf24ba963519e43cef844",
+        "url": "https://api.github.com/repos/genesis-plan/lingjing/git/trees/533fa542d5cef6eec95cf24ba963519e43cef844"
+      },
+      "url": "https://api.github.com/repos/genesis-plan/lingjing/git/commits/07c6adbbc0aa31d08d0e370f62abfd8d9c489baa",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/genesis-plan/lingjing/commits/07c6adbbc0aa31d08d0e370f62abfd8d9c489baa",
+    "html_url": "https://github.com/genesis-plan/lingjing/commit/07c6adbbc0aa31d08d0e370f62abfd8d9c489baa",
+    "comments_url": "https://api.github.com/repos/genesis-plan/lingjing/commits/07c6adbbc0aa31d08d0e370f62abfd8d9c489baa/comments",
+    "author": {
+      "login": "genesis-plan",
+      "id": 255921513,
+      "node_id": "U_kgDOD0ENaQ",
+      "avatar_url": "https://avatars.githubusercontent.com/u/255921513?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/genesis-plan",
+      "html_url": "https://github.com/genesis-plan",
+      "followers_url": "https://api.github.com/users/genesis-plan/followers",
+      "following_url": "https://api.github.com/users/genesis-plan/following{/other_user}",
+      "gists_url": "https://api.github.com/users/genesis-plan/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/genesis-plan/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/genesis-plan/subscriptions",
+      "organizations_url": "https://api.github.com/users/genesis-plan/orgs",
+      "repos_url": "https://api.github.com/users/genesis-plan/repos",
+      "events_url": "https://api.github.com/users/genesis-plan/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/genesis-plan/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "genesis-plan",
+      "id": 255921513,
+      "node_id": "U_kgDOD0ENaQ",
+      "avatar_url": "https://avatars.githubusercontent.com/u/255921513?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/genesis-plan",
+      "html_url": "https://github.com/genesis-plan",
+      "followers_url": "https://api.github.com/users/genesis-plan/followers",
+      "following_url": "https://api.github.com/users/genesis-plan/following{/other_user}",
+      "gists_url": "https://api.github.com/users/genesis-plan/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/genesis-plan/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/genesis-plan/subscriptions",
+      "organizations_url": "https://api.github.com/users/genesis-plan/orgs",
+      "repos_url": "https://api.github.com/users/genesis-plan/repos",
+      "events_url": "https://api.github.com/users/genesis-plan/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/genesis-plan/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "c0852b1b6c2bbcf35fb1cbf2c0af14973c487b39",
+        "url": "https://api.github.com/repos/genesis-plan/lingjing/commits/c0852b1b6c2bbcf35fb1cbf2c0af14973c487b39",
+        "html_url": "https://github.com/genesis-plan/lingjing/commit/c0852b1b6c2bbcf35fb1cbf2c0af14973c487b39"
+      }
+    ]
+  },
+  {
+    "sha": "c0852b1b6c2bbcf35fb1cbf2c0af14973c487b39",
+    "node_id": "C_kwDOUOEmbtoAKGMwODUyYjFiNmMyYmJjZjM1ZmIxY2JmMmMwYWYxNDk3M2M0ODdiMzk",
+    "commit": {
+      "author": {
+        "name": "genesis-plan",
+        "email": "553420544@qq.com",
+        "date": "2026-09-04T09:11:57Z"
+      },
+      "committer": {
+        "name": "genesis-plan",
+        "email": "553420544@qq.com",
+        "date": "2026-09-04T09:11:57Z"
+      },
+      "message": "init",
+      "tree": {
+        "sha": "01fd8c9643357a678a0aec1c30d2cb83c8fd5ad9",
+        "url": "https://api.github.com/repos/genesis-plan/lingjing/git/trees/01fd8c9643357a678a0aec1c30d2cb83c8fd5ad9"
+      },
+      "url": "https://api.github.com/repos/genesis-plan/lingjing/git/commits/c0852b1b6c2bbcf35fb1cbf2c0af14973c487b39",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/genesis-plan/lingjing/commits/c0852b1b6c2bbcf35fb1cbf2c0af14973c487b39",
+    "html_url": "https://github.com/genesis-plan/lingjing/commit/c0852b1b6c2bbcf35fb1cbf2c0af14973c487b39",
+    "comments_url": "https://api.github.com/repos/genesis-plan/lingjing/commits/c0852b1b6c2bbcf35fb1cbf2c0af14973c487b39/comments",
+    "author": {
+      "login": "genesis-plan",
+      "id": 255921513,
+      "node_id": "U_kgDOD0ENaQ",
+      "avatar_url": "https://avatars.githubusercontent.com/u/255921513?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/genesis-plan",
+      "html_url": "https://github.com/genesis-plan",
+      "followers_url": "https://api.github.com/users/genesis-plan/followers",
+      "following_url": "https://api.github.com/users/genesis-plan/following{/other_user}",
+      "gists_url": "https://api.github.com/users/genesis-plan/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/genesis-plan/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/genesis-plan/subscriptions",
+      "organizations_url": "https://api.github.com/users/genesis-plan/orgs",
+      "repos_url": "https://api.github.com/users/genesis-plan/repos",
+      "events_url": "https://api.github.com/users/genesis-plan/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/genesis-plan/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "genesis-plan",
+      "id": 255921513,
+      "node_id": "U_kgDOD0ENaQ",
+      "avatar_url": "https://avatars.githubusercontent.com/u/255921513?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/genesis-plan",
+      "html_url": "https://github.com/genesis-plan",
+      "followers_url": "https://api.github.com/users/genesis-plan/followers",
+      "following_url": "https://api.github.com/users/genesis-plan/following{/other_user}",
+      "gists_url": "https://api.github.com/users/genesis-plan/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/genesis-plan/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/genesis-plan/subscriptions",
+      "organizations_url": "https://api.github.com/users/genesis-plan/orgs",
+      "repos_url": "https://api.github.com/users/genesis-plan/repos",
+      "events_url": "https://api.github.com/users/genesis-plan/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/genesis-plan/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+
+    ]
+  }
+]

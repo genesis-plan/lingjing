@@ -1,0 +1,1754 @@
+{
+  "fetchedAt": "2026-09-14T04:04:17.625Z",
+  "repos": {
+    "lingnao": {
+      "meta": {
+        "description": "灵脑 LingNao — 可审计·确定性·不幻觉的推理引擎（非概率生成式 LLM）。本地 A* 可审计推理 + 世界图 + 七段审计 + do 演算因果；免费 LLM 仅做感知/解释，不进入证明链。46 个 MCP 工具。授权：商业授权 / 非商业免费（非商用免费，商用须书面授权）。",
+        "stars": 0,
+        "forks": 0,
+        "open_issues": 0,
+        "watchers": 0,
+        "size_kb": 3405,
+        "license": "NOASSERTION",
+        "created_at": "2026-08-26T06:53:26Z",
+        "pushed_at": "2026-09-04T05:03:05Z",
+        "default_branch": "main",
+        "network_count": 0
+      },
+      "clones": {
+        "count": 166,
+        "uniques": 65,
+        "clones": [
+          {
+            "timestamp": "2026-08-30T00:00:00Z",
+            "count": 11,
+            "uniques": 7
+          },
+          {
+            "timestamp": "2026-08-31T00:00:00Z",
+            "count": 62,
+            "uniques": 22
+          },
+          {
+            "timestamp": "2026-09-01T00:00:00Z",
+            "count": 1,
+            "uniques": 1
+          },
+          {
+            "timestamp": "2026-09-02T00:00:00Z",
+            "count": 23,
+            "uniques": 9
+          },
+          {
+            "timestamp": "2026-09-03T00:00:00Z",
+            "count": 54,
+            "uniques": 23
+          },
+          {
+            "timestamp": "2026-09-04T00:00:00Z",
+            "count": 7,
+            "uniques": 5
+          },
+          {
+            "timestamp": "2026-09-05T00:00:00Z",
+            "count": 3,
+            "uniques": 3
+          },
+          {
+            "timestamp": "2026-09-06T00:00:00Z",
+            "count": 2,
+            "uniques": 2
+          },
+          {
+            "timestamp": "2026-09-07T00:00:00Z",
+            "count": 2,
+            "uniques": 1
+          },
+          {
+            "timestamp": "2026-09-08T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          },
+          {
+            "timestamp": "2026-09-09T00:00:00Z",
+            "count": 1,
+            "uniques": 1
+          },
+          {
+            "timestamp": "2026-09-10T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          },
+          {
+            "timestamp": "2026-09-11T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          },
+          {
+            "timestamp": "2026-09-12T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          }
+        ]
+      },
+      "views": {
+        "count": 31,
+        "uniques": 9,
+        "views": [
+          {
+            "timestamp": "2026-08-30T00:00:00Z",
+            "count": 3,
+            "uniques": 2
+          },
+          {
+            "timestamp": "2026-08-31T00:00:00Z",
+            "count": 18,
+            "uniques": 8
+          },
+          {
+            "timestamp": "2026-09-01T00:00:00Z",
+            "count": 1,
+            "uniques": 1
+          },
+          {
+            "timestamp": "2026-09-02T00:00:00Z",
+            "count": 9,
+            "uniques": 1
+          },
+          {
+            "timestamp": "2026-09-03T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          },
+          {
+            "timestamp": "2026-09-04T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          },
+          {
+            "timestamp": "2026-09-05T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          },
+          {
+            "timestamp": "2026-09-06T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          },
+          {
+            "timestamp": "2026-09-07T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          },
+          {
+            "timestamp": "2026-09-08T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          },
+          {
+            "timestamp": "2026-09-09T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          },
+          {
+            "timestamp": "2026-09-10T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          },
+          {
+            "timestamp": "2026-09-11T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          },
+          {
+            "timestamp": "2026-09-12T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          }
+        ]
+      },
+      "referrers": [
+        {
+          "referrer": "github.com",
+          "count": 16,
+          "uniques": 6
+        },
+        {
+          "referrer": "Bing",
+          "count": 1,
+          "uniques": 1
+        }
+      ],
+      "paths": [
+        {
+          "path": "/genesis-plan/lingnao",
+          "title": "Overview",
+          "count": 21,
+          "uniques": 8
+        },
+        {
+          "path": "/genesis-plan/lingnao/releases/tag/v1.0.0",
+          "title": "/releases/tag/v1.0.0",
+          "count": 3,
+          "uniques": 3
+        },
+        {
+          "path": "/genesis-plan/lingnao/tags",
+          "title": "/tags",
+          "count": 2,
+          "uniques": 1
+        },
+        {
+          "path": "/genesis-plan/lingnao/tree/main",
+          "title": "/tree/main",
+          "count": 2,
+          "uniques": 1
+        },
+        {
+          "path": "/genesis-plan/lingnao/commit/6d3dc0d668a4cd99554321051bb9b3e13bb3b299",
+          "title": "/commit/6d3dc0d668a4cd99554321051bb9b3e13bb3b299",
+          "count": 1,
+          "uniques": 1
+        },
+        {
+          "path": "/genesis-plan/lingnao/commit/e945a04e83b503f3b56924089f6a9cbde30cc7de",
+          "title": "/commit/e945a04e83b503f3b56924089f6a9cbde30cc7de",
+          "count": 1,
+          "uniques": 1
+        },
+        {
+          "path": "/genesis-plan/lingnao/releases",
+          "title": "/releases",
+          "count": 1,
+          "uniques": 1
+        }
+      ],
+      "releases": [
+        {
+          "tag": "v1.1.1",
+          "name": "lingnao-mcp v1.1.1 · 修1 诚实性",
+          "published": "2026-09-04T05:03:06Z"
+        },
+        {
+          "tag": "v1.1.0",
+          "name": "灵脑 LingNao v3.1 / lingnao-mcp 1.1.0",
+          "published": "2026-09-03T08:08:59Z"
+        },
+        {
+          "tag": "v1.0.0",
+          "name": "灵脑 LingNao v1.0.0 — 架构定型 + 仓库精简",
+          "published": "2026-08-30T16:11:36Z"
+        }
+      ],
+      "lastCommits": [
+        {
+          "sha": "4681de6c",
+          "date": "2026-09-04T04:47:12Z",
+          "msg": "修1：消除 selftest 假绿（诚实性修复）"
+        },
+        {
+          "sha": "afaa5459",
+          "date": "2026-09-03T09:01:46Z",
+          "msg": "清理：移除临时验证脚本(test-*.js)与部署生成物(_kernel_load.js/cos_upload.py)，"
+        },
+        {
+          "sha": "a578fa1e",
+          "date": "2026-09-03T08:30:32Z",
+          "msg": "docs: 重写在线试用页 —— 按「接入拓扑+真实校验」重建"
+        }
+      ],
+      "branches": [
+        "main"
+      ]
+    },
+    "lingshu-solver": {
+      "meta": {
+        "description": "灵数求解器 — 确定性（非大模型）实数方程组求解器，≤6 变量。区间算术 + Krawczyk 构造性认证，每个已验证解数学保真；网页即用或被 AI Agent 通过 MCP 调用。全局穷尽为尽力而为，未穷尽诚实标记 truncated。非商业免费 / 商业须书面授权（详见仓库 LICENSE）；零依赖、离线。安装：npx -y lingshu-solver",
+        "stars": 0,
+        "forks": 0,
+        "open_issues": 0,
+        "watchers": 0,
+        "size_kb": 843,
+        "license": "NOASSERTION",
+        "created_at": "2026-08-24T05:45:11Z",
+        "pushed_at": "2026-09-07T08:05:16Z",
+        "default_branch": "master",
+        "network_count": 0
+      },
+      "clones": {
+        "count": 519,
+        "uniques": 157,
+        "clones": [
+          {
+            "timestamp": "2026-08-30T00:00:00Z",
+            "count": 6,
+            "uniques": 4
+          },
+          {
+            "timestamp": "2026-08-31T00:00:00Z",
+            "count": 73,
+            "uniques": 22
+          },
+          {
+            "timestamp": "2026-09-01T00:00:00Z",
+            "count": 243,
+            "uniques": 70
+          },
+          {
+            "timestamp": "2026-09-02T00:00:00Z",
+            "count": 44,
+            "uniques": 25
+          },
+          {
+            "timestamp": "2026-09-03T00:00:00Z",
+            "count": 20,
+            "uniques": 9
+          },
+          {
+            "timestamp": "2026-09-04T00:00:00Z",
+            "count": 27,
+            "uniques": 14
+          },
+          {
+            "timestamp": "2026-09-05T00:00:00Z",
+            "count": 16,
+            "uniques": 9
+          },
+          {
+            "timestamp": "2026-09-06T00:00:00Z",
+            "count": 6,
+            "uniques": 4
+          },
+          {
+            "timestamp": "2026-09-07T00:00:00Z",
+            "count": 61,
+            "uniques": 25
+          },
+          {
+            "timestamp": "2026-09-08T00:00:00Z",
+            "count": 4,
+            "uniques": 4
+          },
+          {
+            "timestamp": "2026-09-09T00:00:00Z",
+            "count": 7,
+            "uniques": 6
+          },
+          {
+            "timestamp": "2026-09-10T00:00:00Z",
+            "count": 4,
+            "uniques": 4
+          },
+          {
+            "timestamp": "2026-09-11T00:00:00Z",
+            "count": 8,
+            "uniques": 8
+          },
+          {
+            "timestamp": "2026-09-12T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          }
+        ]
+      },
+      "views": {
+        "count": 26,
+        "uniques": 11,
+        "views": [
+          {
+            "timestamp": "2026-08-30T00:00:00Z",
+            "count": 2,
+            "uniques": 1
+          },
+          {
+            "timestamp": "2026-08-31T00:00:00Z",
+            "count": 7,
+            "uniques": 4
+          },
+          {
+            "timestamp": "2026-09-01T00:00:00Z",
+            "count": 5,
+            "uniques": 3
+          },
+          {
+            "timestamp": "2026-09-02T00:00:00Z",
+            "count": 6,
+            "uniques": 1
+          },
+          {
+            "timestamp": "2026-09-03T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          },
+          {
+            "timestamp": "2026-09-04T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          },
+          {
+            "timestamp": "2026-09-05T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          },
+          {
+            "timestamp": "2026-09-06T00:00:00Z",
+            "count": 1,
+            "uniques": 1
+          },
+          {
+            "timestamp": "2026-09-07T00:00:00Z",
+            "count": 2,
+            "uniques": 2
+          },
+          {
+            "timestamp": "2026-09-08T00:00:00Z",
+            "count": 1,
+            "uniques": 1
+          },
+          {
+            "timestamp": "2026-09-09T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          },
+          {
+            "timestamp": "2026-09-10T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          },
+          {
+            "timestamp": "2026-09-11T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          },
+          {
+            "timestamp": "2026-09-12T00:00:00Z",
+            "count": 2,
+            "uniques": 1
+          }
+        ]
+      },
+      "referrers": [
+        {
+          "referrer": "github.com",
+          "count": 8,
+          "uniques": 4
+        }
+      ],
+      "paths": [
+        {
+          "path": "/genesis-plan/lingshu-solver",
+          "title": "Overview",
+          "count": 23,
+          "uniques": 11
+        },
+        {
+          "path": "/genesis-plan/lingshu-solver/branches",
+          "title": "/branches",
+          "count": 1,
+          "uniques": 1
+        },
+        {
+          "path": "/genesis-plan/lingshu-solver/commit/5c7c37ace52617973f1c49b7011d8d7038b9b461",
+          "title": "/commit/5c7c37ace52617973f1c49b7011d8d7038b9b461",
+          "count": 1,
+          "uniques": 1
+        },
+        {
+          "path": "/genesis-plan/lingshu-solver/tags",
+          "title": "/tags",
+          "count": 1,
+          "uniques": 1
+        }
+      ],
+      "releases": [
+        {
+          "tag": "v1.0.8",
+          "name": "v1.0.8 · 网页合规页脚+版权声明",
+          "published": "2026-09-07T08:05:17Z"
+        },
+        {
+          "tag": "v1.0.7",
+          "name": "lingshu-solver v1.0.7",
+          "published": "2026-09-07T05:52:43Z"
+        },
+        {
+          "tag": "v1.0.6",
+          "name": "lingshu-solver v1.0.6 · 修2+修3",
+          "published": "2026-09-04T04:29:24Z"
+        },
+        {
+          "tag": "v1.0.0",
+          "name": "灵数求解器 v1.0.0 · 首个公开发布",
+          "published": "2026-08-24T06:22:48Z"
+        }
+      ],
+      "lastCommits": [
+        {
+          "sha": "bfdbda3a",
+          "date": "2026-09-07T08:03:09Z",
+          "msg": "fix: package.json version 落盘修正为 1.0.8（与发布版本一致）"
+        },
+        {
+          "sha": "d4042b20",
+          "date": "2026-09-07T08:00:28Z",
+          "msg": "release 1.0.8：网页合规页脚+版权声明，MCP 版本号如实上报，发布文件补全 http-mcp-server"
+        },
+        {
+          "sha": "ac7453fd",
+          "date": "2026-09-07T06:55:30Z",
+          "msg": "补：将合规图标 beian.png 纳入版本控制（.gitignore 默认忽略所有文件）"
+        }
+      ],
+      "branches": [
+        "master"
+      ]
+    },
+    "lingjing": {
+      "meta": {
+        "description": "灵境 LingJing — 物理驱动的通用虚拟空间原型。五层框架：PDE 物理底座 → 体空间状态 → POD/SVD 全息降阶 → 边界智能决策 → 反向映射。当前为真实现切片：2D 热传导 + 时间（尚未覆盖完整 3+1 维），双轨代码（浏览器 JS 演示 + Python/NumPy 真规模），决策带可审计账本。",
+        "stars": 0,
+        "forks": 0,
+        "open_issues": 0,
+        "watchers": 0,
+        "size_kb": 215,
+        "license": null,
+        "created_at": "2026-09-04T09:09:06Z",
+        "pushed_at": "2026-09-04T09:15:16Z",
+        "default_branch": "main",
+        "network_count": 0
+      },
+      "clones": {
+        "count": 13,
+        "uniques": 9,
+        "clones": [
+          {
+            "timestamp": "2026-08-30T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          },
+          {
+            "timestamp": "2026-08-31T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          },
+          {
+            "timestamp": "2026-09-01T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          },
+          {
+            "timestamp": "2026-09-02T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          },
+          {
+            "timestamp": "2026-09-03T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          },
+          {
+            "timestamp": "2026-09-04T00:00:00Z",
+            "count": 9,
+            "uniques": 5
+          },
+          {
+            "timestamp": "2026-09-05T00:00:00Z",
+            "count": 1,
+            "uniques": 1
+          },
+          {
+            "timestamp": "2026-09-06T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          },
+          {
+            "timestamp": "2026-09-07T00:00:00Z",
+            "count": 1,
+            "uniques": 1
+          },
+          {
+            "timestamp": "2026-09-08T00:00:00Z",
+            "count": 1,
+            "uniques": 1
+          },
+          {
+            "timestamp": "2026-09-09T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          },
+          {
+            "timestamp": "2026-09-10T00:00:00Z",
+            "count": 1,
+            "uniques": 1
+          },
+          {
+            "timestamp": "2026-09-11T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          },
+          {
+            "timestamp": "2026-09-12T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          }
+        ]
+      },
+      "views": {
+        "count": 0,
+        "uniques": 0,
+        "views": [
+          {
+            "timestamp": "2026-08-30T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          },
+          {
+            "timestamp": "2026-08-31T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          },
+          {
+            "timestamp": "2026-09-01T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          },
+          {
+            "timestamp": "2026-09-02T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          },
+          {
+            "timestamp": "2026-09-03T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          },
+          {
+            "timestamp": "2026-09-04T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          },
+          {
+            "timestamp": "2026-09-05T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          },
+          {
+            "timestamp": "2026-09-06T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          },
+          {
+            "timestamp": "2026-09-07T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          },
+          {
+            "timestamp": "2026-09-08T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          },
+          {
+            "timestamp": "2026-09-09T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          },
+          {
+            "timestamp": "2026-09-10T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          },
+          {
+            "timestamp": "2026-09-11T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          },
+          {
+            "timestamp": "2026-09-12T00:00:00Z",
+            "count": 0,
+            "uniques": 0
+          }
+        ]
+      },
+      "referrers": [],
+      "paths": [],
+      "releases": [],
+      "lastCommits": [
+        {
+          "sha": "07c6adbb",
+          "date": "2026-09-04T09:15:16Z",
+          "msg": "灵境 LingJing 首个提交：五层框架双轨实现（JS + Python/NumPy）"
+        },
+        {
+          "sha": "c0852b1b",
+          "date": "2026-09-04T09:11:57Z",
+          "msg": "init"
+        }
+      ],
+      "branches": [
+        "main"
+      ]
+    }
+  },
+  "npm": {
+    "lingshu_solver": {
+      "dist_tags": {
+        "latest": "1.0.8"
+      },
+      "versions": [
+        "1.0.0",
+        "1.0.1",
+        "1.0.2",
+        "1.0.3",
+        "1.0.4",
+        "1.0.6",
+        "1.0.7",
+        "1.0.8"
+      ],
+      "times": [
+        "1.0.0",
+        "1.0.1",
+        "1.0.2",
+        "1.0.3",
+        "1.0.4",
+        "1.0.6",
+        "1.0.7",
+        "1.0.8"
+      ],
+      "downloads_range": {
+        "start": "2026-01-01",
+        "end": "2026-09-14",
+        "package": "lingshu-solver",
+        "downloads": [
+          {
+            "downloads": 0,
+            "day": "2026-01-01"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-01-02"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-01-03"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-01-04"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-01-05"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-01-06"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-01-07"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-01-08"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-01-09"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-01-10"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-01-11"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-01-12"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-01-13"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-01-14"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-01-15"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-01-16"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-01-17"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-01-18"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-01-19"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-01-20"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-01-21"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-01-22"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-01-23"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-01-24"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-01-25"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-01-26"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-01-27"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-01-28"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-01-29"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-01-30"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-01-31"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-02-01"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-02-02"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-02-03"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-02-04"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-02-05"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-02-06"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-02-07"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-02-08"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-02-09"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-02-10"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-02-11"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-02-12"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-02-13"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-02-14"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-02-15"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-02-16"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-02-17"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-02-18"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-02-19"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-02-20"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-02-21"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-02-22"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-02-23"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-02-24"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-02-25"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-02-26"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-02-27"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-02-28"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-03-01"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-03-02"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-03-03"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-03-04"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-03-05"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-03-06"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-03-07"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-03-08"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-03-09"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-03-10"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-03-11"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-03-12"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-03-13"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-03-14"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-03-15"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-03-16"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-03-17"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-03-18"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-03-19"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-03-20"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-03-21"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-03-22"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-03-23"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-03-24"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-03-25"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-03-26"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-03-27"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-03-28"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-03-29"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-03-30"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-03-31"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-04-01"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-04-02"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-04-03"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-04-04"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-04-05"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-04-06"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-04-07"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-04-08"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-04-09"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-04-10"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-04-11"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-04-12"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-04-13"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-04-14"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-04-15"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-04-16"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-04-17"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-04-18"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-04-19"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-04-20"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-04-21"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-04-22"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-04-23"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-04-24"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-04-25"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-04-26"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-04-27"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-04-28"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-04-29"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-04-30"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-05-01"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-05-02"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-05-03"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-05-04"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-05-05"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-05-06"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-05-07"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-05-08"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-05-09"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-05-10"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-05-11"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-05-12"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-05-13"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-05-14"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-05-15"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-05-16"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-05-17"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-05-18"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-05-19"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-05-20"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-05-21"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-05-22"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-05-23"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-05-24"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-05-25"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-05-26"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-05-27"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-05-28"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-05-29"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-05-30"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-05-31"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-06-01"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-06-02"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-06-03"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-06-04"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-06-05"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-06-06"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-06-07"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-06-08"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-06-09"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-06-10"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-06-11"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-06-12"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-06-13"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-06-14"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-06-15"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-06-16"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-06-17"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-06-18"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-06-19"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-06-20"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-06-21"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-06-22"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-06-23"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-06-24"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-06-25"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-06-26"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-06-27"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-06-28"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-06-29"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-06-30"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-07-01"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-07-02"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-07-03"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-07-04"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-07-05"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-07-06"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-07-07"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-07-08"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-07-09"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-07-10"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-07-11"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-07-12"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-07-13"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-07-14"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-07-15"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-07-16"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-07-17"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-07-18"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-07-19"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-07-20"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-07-21"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-07-22"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-07-23"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-07-24"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-07-25"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-07-26"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-07-27"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-07-28"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-07-29"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-07-30"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-07-31"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-08-01"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-08-02"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-08-03"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-08-04"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-08-05"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-08-06"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-08-07"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-08-08"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-08-09"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-08-10"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-08-11"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-08-12"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-08-13"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-08-14"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-08-15"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-08-16"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-08-17"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-08-18"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-08-19"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-08-20"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-08-21"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-08-22"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-08-23"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-08-24"
+          },
+          {
+            "downloads": 353,
+            "day": "2026-08-25"
+          },
+          {
+            "downloads": 18,
+            "day": "2026-08-26"
+          },
+          {
+            "downloads": 18,
+            "day": "2026-08-27"
+          },
+          {
+            "downloads": 28,
+            "day": "2026-08-28"
+          },
+          {
+            "downloads": 36,
+            "day": "2026-08-29"
+          },
+          {
+            "downloads": 14,
+            "day": "2026-08-30"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-08-31"
+          },
+          {
+            "downloads": 152,
+            "day": "2026-09-01"
+          },
+          {
+            "downloads": 15,
+            "day": "2026-09-02"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-09-03"
+          },
+          {
+            "downloads": 154,
+            "day": "2026-09-04"
+          },
+          {
+            "downloads": 20,
+            "day": "2026-09-05"
+          },
+          {
+            "downloads": 15,
+            "day": "2026-09-06"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-09-07"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-09-08"
+          },
+          {
+            "downloads": 16,
+            "day": "2026-09-09"
+          },
+          {
+            "downloads": 8,
+            "day": "2026-09-10"
+          },
+          {
+            "downloads": 13,
+            "day": "2026-09-11"
+          },
+          {
+            "downloads": 12,
+            "day": "2026-09-12"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-09-13"
+          },
+          {
+            "downloads": 0,
+            "day": "2026-09-14"
+          }
+        ]
+      }
+    }
+  }
+}

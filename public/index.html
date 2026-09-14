@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>灵境·课室 — 教师体验</title>
+<style>
+  :root {
+    --bg:#eef1f6; --card:#fff; --ink:#1f2330; --muted:#6b7280; --line:#e5e7eb;
+    --brand:#4f46e5; --brand-soft:#eef0ff; --board:#243042; --board-ink:#f4f6fb;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+    font-family:-apple-system,"PingFang SC","Microsoft YaHei","Segoe UI",sans-serif; line-height:1.55; }
+  .wrap { max-width:920px; margin:0 auto; padding:18px 16px 60px; }
+  h1 { font-size:20px; margin:0 0 2px; }
+  .sub { color:var(--muted); font-size:12px; margin:0 0 14px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:14px; }
+  label { display:block; font-size:13px; font-weight:600; margin-bottom:6px; }
+  textarea { width:100%; height:84px; resize:vertical; padding:10px 12px;
+    border:1px solid var(--line); border-radius:10px; font-size:14px; font-family:inherit; color:var(--ink); }
+  textarea:focus { outline:2px solid var(--brand-soft); border-color:var(--brand); }
+  .hint { color:var(--muted); font-size:12px; margin-top:6px; }
+  .row { display:flex; gap:10px; align-items:center; margin-top:12px; flex-wrap:wrap; }
+  button { background:var(--brand); color:#fff; border:0; border-radius:10px;
+    padding:10px 18px; font-size:14px; font-weight:600; cursor:pointer; }
+  button:disabled { opacity:.55; cursor:not-allowed; }
+  .ghost { background:transparent; color:var(--brand); border:1px solid var(--line); }
+  .badge { font-size:12px; padding:3px 10px; border-radius:999px; font-weight:600; }
+  .badge.llm { background:#ecfdf5; color:#16a34a; }
+  .badge.fb { background:#fff7ed; color:#ea580c; }
+
+  /* 教室 */
+  .board { background:var(--board); color:var(--board-ink); border-radius:14px; padding:16px 18px; margin-bottom:14px; }
+  .board .who { font-size:12px; opacity:.7; }
+  .board .lt { font-size:17px; font-weight:700; margin:4px 0; }
+  .board .lb { font-size:13px; opacity:.85; white-space:pre-wrap; max-height:84px; overflow:auto; }
+  .seats { display:grid; grid-template-columns:repeat(5,1fr); gap:10px; margin-bottom:14px; }
+  @media (max-width:680px){ .seats{ grid-template-columns:repeat(2,1fr);} }
+  .seat { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:12px 10px; text-align:center; transition:transform .25s, box-shadow .25s; }
+  .seat.active { transform:translateY(-4px); box-shadow:0 6px 18px rgba(79,70,229,.18); border-color:var(--brand); }
+  .ava { width:46px; height:46px; border-radius:50%; margin:0 auto 8px; color:#fff; font-weight:800;
+    display:flex; align-items:center; justify-content:center; font-size:18px; }
+  .seat .nm { font-size:14px; font-weight:700; }
+  .seat .tr { font-size:11px; color:var(--muted); margin-bottom:6px; }
+  .st { font-size:11px; font-weight:700; padding:2px 8px; border-radius:999px; display:inline-block; margin-bottom:8px; background:#f1f5f9; color:#475569; }
+  .st.listen { background:#e0f2fe; color:#0369a1; }
+  .st.think { background:#fef9c3; color:#a16207; }
+  .st.ask { background:#dcfce7; color:#15803d; }
+
+  .feed { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:12px; margin-bottom:14px; min-height:60px; max-height:280px; overflow:auto; }
+  .bub { margin:6px 0; padding:8px 12px; border-radius:12px; background:#f4f5fb; font-size:14px; animation:pop .3s ease; }
+  .bub b { color:var(--brand); }
+  @keyframes pop { from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:none;} }
+  .metrics { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:12px; }
+  .metric { background:var(--brand-soft); border-radius:10px; padding:10px; text-align:center; }
+  .metric .n { font-size:20px; font-weight:800; color:var(--brand); }
+  .metric .l { font-size:11px; color:var(--muted); }
+  .err { background:#fef2f2; color:#b91c1c; border:1px solid #fecaca; padding:12px; border-radius:10px; font-size:13px; }
+  .foot { color:var(--muted); font-size:11px; margin-top:14px; line-height:1.7; }
+  .hidden { display:none; }
+  .spinner { display:inline-block; width:14px; height:14px; border:2px solid #fff; border-top-color:transparent; border-radius:50%; animation:spin .7s linear infinite; vertical-align:-2px; margin-right:6px; }
+  @keyframes spin { to{ transform:rotate(360deg);} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>灵境 · 课室</h1>
+  <p class="sub">教师职业体验切片（MVP #1）—— 你站上讲台讲一节课，5 名学生把听到的、原来想的写下来，并当堂追问。实时流式，不在憋结果。</p>
+
+  <div id="setup" class="card">
+    <label for="lesson">输入你的教案</label>
+    <textarea id="lesson" placeholder="格式：课题名::你的讲解[||概念1|概念2|概念3]&#10;例：手机摄影::优先用自然光，逆光拍人把脸转向光源；构图用三分法。||光线|逆光|三分法"></textarea>
+    <div class="hint">只写「课题名」也行；知识点可选——不给则按句自动抽取 ≤5 个。也可点「🎤 语音输入」对着麦克风讲，自动转文字填入（Chrome/Edge，需 localhost 或 HTTPS）。</div>
+    <div class="row">
+      <button id="go">开始上课</button>
+      <button id="mic" class="ghost">🎤 语音输入</button>
+      <button id="demo" class="ghost">用默认示范（光合作用）</button>
+      <span id="mode"></span>
+    </div>
+  </div>
+
+  <div id="room" class="hidden">
+    <div class="board">
+      <div class="who">你（教师）· 讲台</div>
+      <div class="lt" id="boardTitle"></div>
+      <div class="lb" id="boardBody"></div>
+    </div>
+    <div class="seats" id="seats"></div>
+    <!-- ⚠️ 2026-09-11：这里只放"数得出来的事实"——学生抛出几枚探测、你回了几枚、还欠几枚。
+         不给"AI 学生理解度 / 教学效果 E / 差异度 σ²"这类假数（源头是学生自评或 2-gram 噪声判定，已删）。 -->
+    <div class="metrics">
+      <div class="metric"><div class="n" id="mP">–</div><div class="l">学生抛出探测</div></div>
+      <div class="metric"><div class="n" id="mR">–</div><div class="l">你回了</div></div>
+      <div class="metric"><div class="n" id="mO">–</div><div class="l">没回（课后你判）</div></div>
+    </div>
+    <button id="again" class="ghost">再上一节</button>
+  </div>
+
+  <div id="error" class="hidden"></div>
+
+  <div class="foot">
+    纯前端 + 极简 Node 本地服务，本机运行、未部署。学生当堂把你讲的和他们自己想的写下来、向你追问；
+    课后你会拿到一份「他问的 / 你答的」逐条清单，答到没由你自己判。详见 docs/classroom-framework.md。
+  </div>
+</div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const btn = $('go'), demoBtn = $('demo'), micBtn = $('mic'), ta = $('lesson');
+  const COLORS = ['#6366f1','#ec4899','#f59e0b','#14b8a6','#ef4444'];
+
+  function buildSeats(students){
+    const wrap = $('seats'); wrap.innerHTML = '';
+    students.forEach((s, i) => {
+      const el = document.createElement('div');
+      el.className = 'seat'; el.id = 'seat-' + s.name;
+      el.innerHTML =
+        `<div class="ava" style="background:${COLORS[i%COLORS.length]}">${s.name[0]}</div>` +
+        `<div class="nm">${s.name}</div>` +
+        `<div class="tr">${s.trait}</div>` +
+        `<div class="st" id="st-${s.name}">待上课</div>`;
+      wrap.appendChild(el);
+    });
+  }
+  function setStatus(name, cls, txt){
+    const el = $('st-' + name); if(!el) return;
+    el.className = 'st ' + cls; el.textContent = txt;
+  }
+
+  function handleEvent(ev){
+    if (ev.type === 'start'){
+      $('setup').classList.add('hidden');
+      $('room').classList.remove('hidden');
+      $('boardTitle').textContent = '《' + ev.lessonTitle + '》';
+      $('boardBody').textContent = ev.lessonText;
+      buildSeats(ev.students);
+      $('feed').innerHTML = '';
+      return;
+    }
+    if (ev.type === 'round_start'){
+      document.querySelectorAll('.st').forEach(s => { if(s.textContent!=='待上课'){ s.className='st listen'; s.textContent='听讲中'; }});
+      const f = document.createElement('div'); f.className='bub'; f.style.background='#eef0ff';
+      f.innerHTML = '<b>第 ' + ev.round + ' 轮</b> · 学生开始听讲…'; $('feed').appendChild(f);
+      return;
+    }
+    // （understand 事件已删除：它带的是学生自评理解度 R 的假数，服务端不再发）
+    if (ev.type === 'ask'){
+      setStatus(ev.name, 'ask', '提问中');
+      const f = document.createElement('div'); f.className='bub';
+      f.innerHTML = '<b>' + ev.name + '</b>：' + esc(ev.text || '（未发言）');
+      $('feed').appendChild(f); $('feed').scrollTop = $('feed').scrollHeight;
+      const seat = $('seat-' + ev.name); if(seat) setTimeout(()=>seat.classList.remove('active'), 600);
+      return;
+    }
+    if (ev.type === 'round_end'){
+      if (typeof ev.probeCount === 'number') $('mP').textContent = ev.probeCount;
+      document.querySelectorAll('.st').forEach(s => { if(s.textContent==='提问中'||s.textContent==='思考中'){ s.className='st listen'; s.textContent='听讲中'; }});
+      return;
+    }
+    if (ev.type === 'done'){
+      const g = ev.gains || {};
+      $('mP').textContent = (g.probes != null ? g.probes : '–');
+      $('mR').textContent = (g.answered != null ? g.answered : '–');
+      $('mO').textContent = (g.open != null ? g.open : '–');
+      const f = document.createElement('div'); f.className='bub'; f.style.background='#dcfce7';
+      f.innerHTML = '<b>课堂结束</b> · 作品 ' + ev.artifacts + ' 件，在场 ' + ev.agents + ' 人。' + (ev.usedLLM ? '（真实 LLM 学生）' : '（确定性兜底）');
+      $('feed').appendChild(f); $('feed').scrollTop = $('feed').scrollHeight;
+      return;
+    }
+    if (ev.type === 'error'){
+      $('error').textContent = '出错了：' + ev.message; $('error').classList.remove('hidden');
+    }
+  }
+
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+  async function teach(){
+    btn.disabled = demoBtn.disabled = true;
+    $('error').classList.add('hidden');
+    try {
+      const resp = await fetch('/api/teach', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ lesson: ta.value }),
+      });
+      const reader = resp.body.getReader();
+      const dec = new TextDecoder(); let buf = '';
+      while (true){
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream:true });
+        let idx;
+        while ((idx = buf.indexOf('\n\n')) >= 0){
+          const chunk = buf.slice(0, idx); buf = buf.slice(idx + 2);
+          const line = chunk.split('\n').find(l => l.startsWith('data: '));
+          if (line) handleEvent(JSON.parse(line.slice(6)));
+        }
+      }
+    } catch (e){
+      $('error').textContent = '出错了：' + (e.message || e); $('error').classList.remove('hidden');
+    } finally {
+      btn.disabled = demoBtn.disabled = false;
+    }
+  }
+
+  // 浏览器原生语音输入（Web Speech API）：零税、不接 ASR 厂商、不改后端
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR){ micBtn.disabled = true; micBtn.title = '当前浏览器不支持语音输入（请用 Chrome / Edge）'; }
+  else {
+    const rec = new SR(); rec.lang = 'zh-CN'; rec.continuous = true; rec.interimResults = false;
+    let micOn = false;
+    rec.onresult = (e) => { let t=''; for(let i=e.resultIndex;i<e.results.length;i++) t+=e.results[i][0].transcript; ta.value=(ta.value?ta.value+' ':'')+t.trim(); };
+    rec.onerror = (e) => { micBtn.textContent='🎤 语音输入'; micOn=false; $('mode').innerHTML='<span class="badge fb">语音出错：'+(e.error||'未知')+'</span>'; };
+    rec.onend = () => { micOn=false; micBtn.textContent='🎤 语音输入'; };
+    micBtn.onclick = () => { if(micOn){ rec.stop(); return; } try{ rec.start(); micOn=true; micBtn.textContent='⏹ 停止录音'; $('mode').innerHTML='<span class="badge llm">聆听中…讲完点停止</span>'; }catch{} };
+  }
+
+  btn.onclick = teach;
+  demoBtn.onclick = () => { ta.value = ''; teach(); };
+  $('again').onclick = () => { $('room').classList.add('hidden'); $('setup').classList.remove('hidden'); };
+</script>
+</body>
+</html>
