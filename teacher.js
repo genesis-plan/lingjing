@@ -232,7 +232,9 @@ const PROBE_ROLES = {
 const PROBE_ORDER = ['counter', 'bound', 'example', 'distinct', 'mechanism', 'apply'];
 // 人类回话之后，任务加一层"先接话、再探测"（让课堂是对话，不是各自朗诵）
 const FOLLOW_PREFIX = ['先回应先生刚才那句话，再', '听完先生这句，', '先生这么一说，你'];
-// 本轮该学生盯哪个要点：串开索引，保证一轮之内 5 个学生不撞车、且覆盖全篇
+// 本轮该学生盯哪个要点：串开索引，保证一轮之内 K 个学生不撞车、且覆盖全篇。
+// 即「子模覆盖」的贪心指派（Nemhauser 1978 近似 1−1/e）：每枚探测覆盖一个新要点时边际增益最大；
+// 当 K≤M 时一轮即可全覆盖——这是探测调度形式化的理论依据。
 function probeTarget(concepts, k, round) {
   const M = Math.max(1, concepts.length);
   return concepts[(((k + round - 1) % M) + M) % M] || concepts[0] || '先生讲的内容';
@@ -241,6 +243,20 @@ function probeTarget(concepts, k, round) {
 function probeKind(k, round) {
   const n = PROBE_ORDER.length;
   return PROBE_ORDER[(((k + round - 1) % n) + n) % n];
+}
+
+// 信息论覆盖（概念空间）：探测对要点的覆盖 + 剩余盲区熵；覆盖 ≠ 掌握，只报事实
+// 作为"探测调度 = 子模覆盖贪心"的可观测输出（Nemhauser 1978 近似 1−1/e）
+function conceptCoverage(probes, concepts) {
+  const M = Math.max(1, concepts.length);
+  const hit = new Set(probes.map((p) => p.ci).filter((c) => c != null));
+  const covered = hit.size;
+  const uncovered = concepts.map((c, j) => j).filter((j) => !hit.has(j)).map((j) => concepts[j]);
+  const counts = concepts.map((_, j) => probes.filter((p) => p.ci === j).length);
+  const total = counts.reduce((a, b) => a + b, 0) || 1;
+  let H = 0;
+  for (const c of counts) if (c > 0) { const p = c / total; H -= p * Math.log2(p); }
+  return { covered, total: M, uncovered, entropy: H, maxEntropy: Math.log2(M) };
 }
 
 // 老师刚回过话时的"接话开头"（让兜底也像对话，而不是自说自话）
@@ -443,8 +459,8 @@ async function studentTurn(st, ctx) {
 }
 
 // ===== 课堂会话（支持"老师回话 → 学生再反应"的闭环）=====
-function createSession(lesson, { maxRounds = 4 } = {}) {
-  const w = new World();
+function createSession(lesson, { maxRounds = 4, world } = {}) {
+  const w = world || new World();
   const teacher = { id: w.addAgent({ kind: 'agent', name: '你（教师）', profession: 'teacher' }), name: '你（教师）' };
 
   const lessonTitle = lesson.title;
@@ -642,6 +658,7 @@ function createSession(lesson, { maxRounds = 4 } = {}) {
     const pts = teacherPoints(lessonText);
     const clarify = teacherReplies.filter((r) => r.clarifying).length;
     const counts = probeCounts(probes);
+    const cov = conceptCoverage(probes, concepts);
     const gains = {
       points: pts.length,                       // 你讲出的要点条数
       replies: teacherReplies.length,           // 你回答了几轮
@@ -651,17 +668,29 @@ function createSession(lesson, { maxRounds = 4 } = {}) {
       probeKinds: counts,
       answered: probes.filter((p) => p.answer != null).length,  // 其中几枚收到了你的回答（事实，非判定）
       open: probes.filter((p) => p.answer == null).length,      // 其中几枚你没回（多为收尾前刚问的）
+      coverage: `${cov.covered}/${cov.total}`,                    // 概念覆盖（信息论，非掌握）
+      uncovered: cov.uncovered,
+      conceptEntropy: Number(cov.entropy.toFixed(2)),
+      conceptEntropyMax: Number(cov.maxEntropy.toFixed(2)),
+      meaning: w.relatedness(teacher.id),                        // 意义供给 = 教师在 R 图度中心性（共在他人数）
     };
 
     // —— 教师元认知收益层（需求⑥：教中学 / protégé effect + IOED + 费曼）——
     // 把课堂里**真实说过的话**（你的要点、你是否带出前提/例子、学生问了什么、你答了什么）整理成
     // 人话反馈：不替你下"答到了没有"的结论，而是把问题与你的回答并排放好，逼你自己正视。
     const teacherDiag = teacherDiagnosis({ points: pts, teacherReplies, probes });
-    const teacherReportMd = teacherReport(teacherDiag, { title: lessonTitle });
+    let teacherReportMd = teacherReport(teacherDiag, { title: lessonTitle });
+    // 概念覆盖（信息论，非掌握度）：把"探测覆盖多少要点 / 剩余盲区"作为可观测事实报给教师
+    const covLine = `本节课你讲了 ${cov.total} 个要点，学生探测覆盖了 ${cov.covered} 个`
+      + `（盲区：${cov.uncovered.length ? cov.uncovered.join('、') : '无'}）；`
+      + `探测分散度熵 H=${cov.entropy.toFixed(2)}（最大 ${cov.maxEntropy.toFixed(2)}，越高越均匀）。`
+      + `覆盖≠掌握，只说明"哪些要点被学生逼你讲透了"。`;
+    teacherReportMd += '\n\n## 概念覆盖（信息论，非掌握度）\n' + covLine;
 
     // —— 作品：五生共同的《课堂纪要》落盘 ——
     let minutes = { md: '', by: '', path: '', error: '' };
     let teacherGainFile = '';
+    let worldPath = '';
     try {
       const m = await buildMinutes();
       const dir = path.join(__dirname, 'sessions');
@@ -676,6 +705,10 @@ function createSession(lesson, { maxRounds = 4 } = {}) {
       teacherGainFile = path.join(dir, `${base}-我的收获.md`);
       fs.writeFileSync(teacherGainFile, teacherReportMd, 'utf-8');
       onLog(`《我的收获》（教中学反馈）已写出 → ${teacherGainFile}`);
+      // 世界对象本身持久化（R-M2 修复：world.save 原语已落，此处接入会话生命周期）
+      worldPath = path.join(dir, `${base}-world.json`);
+      try { w.save(worldPath); onLog(`世界状态已持久化 → ${worldPath}（T=${w.T}）`); }
+      catch (we) { onLog(`世界持久化失败（不阻塞课堂）：${String((we && we.message) || we)}`); }
     } catch (e) {
       minutes = { md: '', by: '', path: '', error: String((e && e.message) || e) };
       onLog(`《课堂纪要》生成失败：${minutes.error}`);
@@ -698,13 +731,18 @@ function createSession(lesson, { maxRounds = 4 } = {}) {
 
     onLog(`你的收获：要点 ${gains.points} 条 · 澄清型回答 ${gains.clarifying}/${gains.replies} · 学生抛出探测 ${gains.probes} 枚`
       + `${gains.probeLine ? '（' + gains.probeLine + '）' : ''} · 其中 ${gains.answered} 枚你回了、${gains.probes - gains.answered} 枚没回`
-      + `（"答到没有"由你在课后逐条判——机器只能数词，不能读心）`);
+      + `（"答到没有"由你在课后逐条判——机器只能数词，不能读心）`
+      + ` · 概念覆盖 ${gains.coverage}（盲区 ${gains.uncovered.length} 个）· 意义供给(中心性) ${gains.meaning}`);
     if (!llmUsable()) onLog(`（注：${KEY ? 'LLM 当前不可用：' + (deadReason || '额度/限流') : '未检测到 LINGJING_OR_KEY'}，学生发言走确定性兜底语料）`);
 
     const result = {
       lessonTitle, lessonText, concepts, difficulties,
       students: students.map((s) => ({ name: s.name, trait: s.trait, alpha: s.alpha, voice: s.voice, catch: s.catch, mis: s.mis, probeType: s.probeType })),
       rounds, lessons, notes, artifacts: lessons + notes,
+      worldPath, worldT: w.T,
+      coverage: gains.coverage, uncovered: gains.uncovered,
+      conceptEntropy: gains.conceptEntropy, conceptEntropyMax: gains.conceptEntropyMax,
+      meaning: gains.meaning,
       teachingEdges: [...w.R.values()].length, V, agents: w.measure().agents,
       usedLLM: llmUsable(),
       transcript: memory,

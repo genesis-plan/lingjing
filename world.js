@@ -31,11 +31,13 @@ class World {
     if (!a.id) a.id = newId('agent');
     this.S.set(a.id, a);
     this.M.info += 1;
+    this.T += 1;            // 离散时钟：每次结构性变更都推进（顶点创建 = 一个世界事件）
     return a.id;
   }
 
   // 持久作品：教案 / 学生笔记 / 物理快照 等
   addArtifact({ owner, kind = 'artifact', payload, tick }) {
+    this.T += 1;            // 离散时钟：每枚作品 = 一个世界事件
     const id = newId('art');
     const art = { id, owner, kind, payload, tick: (tick != null ? tick : this.T) };
     this.S.set(id, art);
@@ -72,6 +74,14 @@ class World {
     let agents = 0;
     for (const v of this.S.values()) if (v._isAgent) agents++;
     return Object.assign({}, this.M, { T: this.T, agents, artifacts: this.M.artifactCount });
+  }
+
+  // 意义 / 关系供给：人类节点在关系图 R 中的度中心性 = 直接连接的"他人"数
+  // （MVP 教学边 teacher→student；多人在线时含 peer 边，中心性自然升高 = 被需要 / 被看见）
+  relatedness(humanId) {
+    let degree = 0;
+    for (const r of this.R.values()) if (r.from === humanId) degree += 1;
+    return degree;
   }
 
   snapshot() {

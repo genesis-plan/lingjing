@@ -61,9 +61,20 @@
   .hidden { display:none; }
   .spinner { display:inline-block; width:14px; height:14px; border:2px solid #fff; border-top-color:transparent; border-radius:50%; animation:spin .7s linear infinite; vertical-align:-2px; margin-right:6px; }
   @keyframes spin { to{ transform:rotate(360deg);} }
+  .chk { display:flex; align-items:center; gap:8px; font-size:13px; font-weight:500; margin-top:10px; color:var(--ink); cursor:pointer; }
+  .chk input { width:16px; height:16px; }
+  .md { white-space:pre-wrap; font-size:13px; line-height:1.6; background:#f8fafc; border:1px solid var(--line); border-radius:10px; padding:12px; max-height:320px; overflow:auto; font-family:inherit; }
+  #drawer summary { cursor:pointer; font-weight:700; font-size:14px; }
+  /* 合规（《人工智能拟人化互动服务管理暂行办法》）：须显著提示"正在与 AI 而非自然人交互"，
+     且不得诱导情感依赖。做法=常驻小字，不弹窗、不挡人（pointer-events:none，不拦截操作）。 */
+  #aiNote { position:fixed; top:10px; left:10px; max-width:300px; font-size:11px; line-height:1.55; color:#6b7280;
+    background:rgba(255,255,255,.92); border:1px solid var(--line); border-radius:10px; padding:7px 10px; z-index:50; pointer-events:none; }
+  #aiNote b { color:#374151; }
+  .badgeAI { display:inline-block; font-size:10px; font-weight:700; color:#fff; background:#9ca3af; border-radius:6px; padding:1px 6px; margin-left:6px; vertical-align:middle; }
 </style>
 </head>
 <body>
+<div id="aiNote"><b>你正在与 AI 交互。</b>这里的 5 名学生由人工智能模拟，不是真人；课后的纪要、卡片与总结由算法根据课堂实录生成，仅供回顾参考，不能替代真实的老师与同学。</div>
 <div class="wrap">
   <h1>灵境 · 课室</h1>
   <p class="sub">教师职业体验切片（MVP #1）—— 你站上讲台讲一节课，5 名学生把听到的、原来想的写下来，并当堂追问。实时流式，不在憋结果。</p>
@@ -78,6 +89,7 @@
       <button id="demo" class="ghost">用默认示范（光合作用）</button>
       <span id="mode"></span>
     </div>
+    <label class="chk"><input type="checkbox" id="interactive" /> 互动模式：学生问完我打字回答，再看下一轮（默认一键跑满、实时看反应）</label>
   </div>
 
   <div id="room" class="hidden">
@@ -94,14 +106,28 @@
       <div class="metric"><div class="n" id="mR">–</div><div class="l">你回了</div></div>
       <div class="metric"><div class="n" id="mO">–</div><div class="l">没回（课后你判）</div></div>
     </div>
+    <div id="replyPanel" class="card hidden" style="margin-top:0">
+      <label for="reply">你的回答（第 <span id="rnd">1</span> 轮学生追问后）</label>
+      <textarea id="reply" placeholder="把你对刚才学生追问的回答打出来；这一轮没空回也行，直接点「结束并生成」"></textarea>
+      <div class="row">
+        <button id="send">发下一轮</button>
+        <button id="skip" class="ghost" style="display:none">结束并生成《我的收获》</button>
+        <span id="replyHint" class="hint"></span>
+      </div>
+    </div>
     <button id="again" class="ghost">再上一节</button>
+    <details id="drawer" class="card hidden" style="margin-top:14px">
+      <summary>📭 课后抽屉 · 我的收获 / 课堂纪要</summary>
+      <div id="gainBox"></div>
+    </details>
   </div>
 
   <div id="error" class="hidden"></div>
 
   <div class="foot">
     纯前端 + 极简 Node 本地服务，本机运行、未部署。学生当堂把你讲的和他们自己想的写下来、向你追问；
-    课后你会拿到一份「他问的 / 你答的」逐条清单，答到没由你自己判。详见 docs/classroom-framework.md。
+    课后你会拿到一份「他问的 / 你答的」逐条清单，答到没由你自己判。详见 docs/classroom-framework.md。<br>
+    本页用匿名 cookie 仅统计「是否有陌生人二次到访」以验证需求，不含个人信息、不跨站追踪；浏览器开启「请勿追踪 (DNT)」即完全不记录。
   </div>
 </div>
 
@@ -109,6 +135,8 @@
   const $ = (id) => document.getElementById(id);
   const btn = $('go'), demoBtn = $('demo'), micBtn = $('mic'), ta = $('lesson');
   const COLORS = ['#6366f1','#ec4899','#f59e0b','#14b8a6','#ef4444'];
+  let sessionId = null;     // 互动模式：/api/class/start 回的会话 id
+  let interactive = false;  // 是否走「人打字→AI 回话」闭环
 
   function buildSeats(students){
     const wrap = $('seats'); wrap.innerHTML = '';
@@ -127,8 +155,10 @@
     const el = $('st-' + name); if(!el) return;
     el.className = 'st ' + cls; el.textContent = txt;
   }
+  function showErr(msg){ $('error').textContent = '出错了：' + msg; $('error').classList.remove('hidden'); }
 
   function handleEvent(ev){
+    if (ev.type === 'session'){ sessionId = ev.id; return; }  // 互动模式：记下会话 id 供后续 reply
     if (ev.type === 'start'){
       $('setup').classList.add('hidden');
       $('room').classList.remove('hidden');
@@ -136,12 +166,15 @@
       $('boardBody').textContent = ev.lessonText;
       buildSeats(ev.students);
       $('feed').innerHTML = '';
+      $('drawer').classList.add('hidden');
+      $('replyPanel').classList.add('hidden');
       return;
     }
     if (ev.type === 'round_start'){
       document.querySelectorAll('.st').forEach(s => { if(s.textContent!=='待上课'){ s.className='st listen'; s.textContent='听讲中'; }});
       const f = document.createElement('div'); f.className='bub'; f.style.background='#eef0ff';
       f.innerHTML = '<b>第 ' + ev.round + ' 轮</b> · 学生开始听讲…'; $('feed').appendChild(f);
+      $('rnd').textContent = ev.round;
       return;
     }
     // （understand 事件已删除：它带的是学生自评理解度 R 的假数，服务端不再发）
@@ -156,6 +189,18 @@
     if (ev.type === 'round_end'){
       if (typeof ev.probeCount === 'number') $('mP').textContent = ev.probeCount;
       document.querySelectorAll('.st').forEach(s => { if(s.textContent==='提问中'||s.textContent==='思考中'){ s.className='st listen'; s.textContent='听讲中'; }});
+      // 互动模式：本轮结束 → 亮回复面板，等老师打字；末轮则改为「结束并生成」
+      if (interactive){
+        $('replyPanel').classList.remove('hidden');
+        $('reply').focus();
+        if (ev.canContinue){
+          $('send').style.display = ''; $('skip').style.display = 'none';
+          $('replyHint').textContent = '学生抛完追问了，写下你的回答 →';
+        } else {
+          $('send').style.display = 'none'; $('skip').style.display = '';
+          $('replyHint').textContent = '已是最后一轮，点「结束并生成」产出《我的收获》';
+        }
+      }
       return;
     }
     if (ev.type === 'done'){
@@ -166,41 +211,72 @@
       const f = document.createElement('div'); f.className='bub'; f.style.background='#dcfce7';
       f.innerHTML = '<b>课堂结束</b> · 作品 ' + ev.artifacts + ' 件，在场 ' + ev.agents + ' 人。' + (ev.usedLLM ? '（真实 LLM 学生）' : '（确定性兜底）');
       $('feed').appendChild(f); $('feed').scrollTop = $('feed').scrollHeight;
+      $('replyPanel').classList.add('hidden');
+      renderDrawer(ev);  // 课后抽屉：我的收获 + 课堂纪要（人判契约，机器不评分）
       return;
     }
     if (ev.type === 'error'){
-      $('error').textContent = '出错了：' + ev.message; $('error').classList.remove('hidden');
+      showErr(ev.message);
     }
+  }
+
+  // 课后抽屉：把「他问的 / 你答的」与教中学反馈摆出来，答到没由人自己判
+  function renderDrawer(ev){
+    const gain = ev.teacherReportMd || '';
+    const minutes = (ev.minutes && ev.minutes.md) || '';
+    $('gainBox').innerHTML =
+      '<h3 style="margin:6px 0">我的收获（教中学反馈）<span class="badgeAI">AI 生成</span></h3><pre class="md">' + esc(gain) + '</pre>' +
+      '<h3 style="margin:14px 0 6px">课堂纪要（五生合写）<span class="badgeAI">AI 生成</span></h3><pre class="md">' + esc(minutes) + '</pre>' +
+      '<p class="hint">答到没、懂没懂，由你自己判——机器只把「他问的 / 你答的」并排摆好。</p>';
+    $('drawer').classList.remove('hidden');
   }
 
   function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
-  async function teach(){
+  // 共享 SSE 解析：POST+SSE（fetch 流式；EventSource 只支持 GET，本产品端点都是 POST）
+  async function pump(resp){
+    const reader = resp.body.getReader();
+    const dec = new TextDecoder(); let buf = '';
+    while (true){
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream:true });
+      let idx;
+      while ((idx = buf.indexOf('\n\n')) >= 0){
+        const chunk = buf.slice(0, idx); buf = buf.slice(idx + 2);
+        const line = chunk.split('\n').find(l => l.startsWith('data: '));
+        if (line) handleEvent(JSON.parse(line.slice(6)));
+      }
+    }
+  }
+
+  async function startClass(){
+    interactive = $('interactive').checked;
     btn.disabled = demoBtn.disabled = true;
     $('error').classList.add('hidden');
     try {
-      const resp = await fetch('/api/teach', {
+      const endpoint = interactive ? '/api/class/start' : '/api/teach';
+      const resp = await fetch(endpoint, {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ lesson: ta.value }),
       });
-      const reader = resp.body.getReader();
-      const dec = new TextDecoder(); let buf = '';
-      while (true){
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += dec.decode(value, { stream:true });
-        let idx;
-        while ((idx = buf.indexOf('\n\n')) >= 0){
-          const chunk = buf.slice(0, idx); buf = buf.slice(idx + 2);
-          const line = chunk.split('\n').find(l => l.startsWith('data: '));
-          if (line) handleEvent(JSON.parse(line.slice(6)));
-        }
-      }
-    } catch (e){
-      $('error').textContent = '出错了：' + (e.message || e); $('error').classList.remove('hidden');
-    } finally {
-      btn.disabled = demoBtn.disabled = false;
-    }
+      await pump(resp);
+    } catch (e){ showErr(e.message || e); }
+    finally { btn.disabled = demoBtn.disabled = false; }
+  }
+
+  // 互动模式：老师回话 → 下一轮（或末轮收尾）
+  async function sendReply(){
+    if (!sessionId) return;
+    $('send').disabled = true; $('skip').disabled = true; $('reply').disabled = true;
+    try {
+      const resp = await fetch('/api/class/reply', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ id: sessionId, text: $('reply').value }),
+      });
+      await pump(resp);
+    } catch (e){ showErr(e.message || e); }
+    finally { $('send').disabled = false; $('skip').disabled = false; $('reply').disabled = false; $('reply').value = ''; }
   }
 
   // 浏览器原生语音输入（Web Speech API）：零税、不接 ASR 厂商、不改后端
@@ -215,9 +291,15 @@
     micBtn.onclick = () => { if(micOn){ rec.stop(); return; } try{ rec.start(); micOn=true; micBtn.textContent='⏹ 停止录音'; $('mode').innerHTML='<span class="badge llm">聆听中…讲完点停止</span>'; }catch{} };
   }
 
-  btn.onclick = teach;
-  demoBtn.onclick = () => { ta.value = ''; teach(); };
-  $('again').onclick = () => { $('room').classList.add('hidden'); $('setup').classList.remove('hidden'); };
+  btn.onclick = startClass;
+  demoBtn.onclick = () => { ta.value = ''; startClass(); };
+  $('send').onclick = sendReply;
+  $('skip').onclick = sendReply;   // 末轮「结束并生成」= 发空回复触发 finalize
+  $('again').onclick = () => {
+    sessionId = null;
+    $('room').classList.add('hidden'); $('setup').classList.remove('hidden');
+    $('drawer').classList.add('hidden'); $('replyPanel').classList.add('hidden');
+  };
 </script>
 </body>
 </html>
