@@ -41,7 +41,7 @@ ok(['experience', 'game', 'practice', 'theory'].every((k) => s.senses[k].value >
 ok(s.flow.trajectory.length === 3, 'Flow 轨迹按轮次');
 ok(s.reviewAt.every((t) => t > 0), '复习时刻为正');
 const md = summaryToMarkdown(s);
-ok(md.includes('## 一、你的四感') && md.includes('## 五、本课用到的数学'), 'Markdown 含四感与数学地图');
+ok(md.includes('## 一、你的四感') && md.includes('## 六、本课用到的数学'), 'Markdown 含四感与数学地图');
 ok(md.includes('## 二、学生问的 / 你答的（逐条并排，答到没有你自己判）'), 'Markdown 第二节＝他问的/你答的逐条并排（由人自己判）');
 ok(!/学生达成|掌握度|BKT/.test(md), '总结里不再出现"学生达成/掌握度/BKT"（假理论已清）');
 

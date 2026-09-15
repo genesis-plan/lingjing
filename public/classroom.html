@@ -142,6 +142,15 @@
   #work .human b{ color:#7a2c20; font-size:18px; padding:0 2px; }
   #work .human .fine{ font-size:11.5px; color:#8a7f6a; }
   #work .blind{ font-size:13px; color:#7a2c20; line-height:1.9; margin-top:10px; }
+  #work .notes{ margin-top:14px; border-top:1px dashed #d9cfb4; padding-top:10px; }
+  #work .notes > h3{ border-left-color:#3a6a8a; color:#3a6a8a; }
+  #work .ncard{ font-size:13px; color:#4a4237; line-height:1.9; margin:8px 0; padding:8px 10px; background:#f3f1e8; border-radius:8px; }
+  #work .ncard > b{ color:#3a6a8a; }
+  #work .nsub{ font-size:12px; color:#6a5f4a; margin:4px 0 2px 12px; }
+  #work .nself{ font-size:12px; color:#7a2c20; margin-top:4px; }
+  #work .weak{ margin-top:14px; border-top:1px dashed #d9cfb4; padding-top:10px; }
+  #work .weak > h3{ border-left-color:#7a2c20; color:#7a2c20; }
+  #work .wcard{ font-size:13px; color:#7a2c20; line-height:1.9; margin:6px 0; }
   #work .acts{ margin-top:16px; display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
   #work button{ background:#8a6a3a; color:#fff8e8; border:0; border-radius:10px; padding:10px 18px;
     font-size:14px; font-weight:600; cursor:pointer; }
@@ -214,6 +223,8 @@ addEventListener('unhandledrejection',function(e){var d=document.getElementById(
       <div class="human" id="wkHuman"></div>
       <div class="blind" id="wkBlind"></div>
       <div class="gain" id="wkGain"></div>
+      <div class="notes" id="wkNotes"></div>
+      <div class="weak" id="wkWeak"></div>
     </div>
     <div class="acts">
       <button id="copyMd">复制这份纪要</button>
@@ -252,6 +263,10 @@ const FALLBACK_ROSTER = [
   { name:'小明', trait:'好奇型' }, { name:'小红', trait:'严谨型' }, { name:'小刚', trait:'活泼型' },
   { name:'小丽', trait:'害羞型' }, { name:'小华', trait:'自信型' },
 ];
+
+// P0-1 / P0-2：课后抽屉用的本地小工具（不依赖 summary.mjs 的模块作用域）
+const PROBE_LABEL = { counter:'反例', bound:'边界', example:'正例', distinct:'区分', mechanism:'机制', apply:'应用' };
+const cut = (s, n = 30) => { const t = String(s || '').trim(); return t.length > n ? t.slice(0, n) + '…' : (t || '—'); };
 
 const $ = (id) => document.getElementById(id);
 const stage = $('stage'), cover = $('cover'), fg = $('fg'), castLayer = $('cast');
@@ -457,7 +472,7 @@ function fillDrawer(ev){
     + '纪要走笔：' + (m.by || '—') + '<br>'
     + '学生发言来源：' + src + '<br>'
     + 'AI 学生状态：' + (llmInfo ? modeDetail(llmInfo) : '未知') + '<br>'
-    + '纪要落盘：' + (m.path ? m.path : (m.error ? ('落盘异常：' + m.error) : '—');
+    + '纪要落盘：' + (m.path ? m.path : (m.error ? ('落盘异常：' + m.error) : '—'));
   $('dNote').textContent = '「答到没」由你课后逐条对着清单自己判——机器只数你回了几枚、欠几枚，不替你下结论。'
     + '这一页的数据是给想深挖的人看的，课堂上不出现。';
 }
@@ -496,6 +511,45 @@ function renderWork(ev){
   // 这是需求⑥的核心交付物——让使用者从讲授中获得"属于自己的东西"。只进课后面板，不进体验层。
   $('wkGain').innerHTML = mdToHtml(String(ev.teacherReportMd || '').replace(/^\s*#\s+.*(\r?\n)+/, '') || '<p class="fine">（本次没有生成你的收获报告）</p>');
   lastGainMd = ev.teacherReportMd || '';
+
+  // —— P0-2：AI 理解笔记（镜子，含它没搞懂的）——
+  const notes = ev.aiNotes || [];
+  if (notes.length) {
+    let h = '<h3 class="kai">AI 理解笔记（镜子，含它没搞懂的）</h3>';
+    h += '<p class="fine">这不是给 AI 学生打分，是把它们当镜子——它们记下的、没搞清的，正把你讲解里的口子镜像回来。数据不删、不对外、不评分。</p>';
+    for (const n of notes) {
+      h += '<div class="ncard"><b>' + escapeHtml(n.name) + '</b> <span class="fine">进课堂前的旧想法：' + escapeHtml(n.mis) + '</span>';
+      if (n.took && n.took.length) {
+        h += '<div class="nsub">它记下的（先生原话）：';
+        for (const t of n.took) h += '<div>· 第' + t.round + '轮［' + escapeHtml(PROBE_LABEL[t.type] || '探测') + '］' + escapeHtml(cut(t.q, 30)) + ' → 先生：「' + escapeHtml(cut(t.answer, 36)) + '」</div>';
+        h += '</div>';
+      }
+      if (n.stuck && n.stuck.length) {
+        h += '<div class="nsub">它还没搞清的（你没回到的口子）：';
+        for (const t of n.stuck) h += '<div>· 第' + t.round + '轮［' + escapeHtml(PROBE_LABEL[t.type] || '探测') + '］' + escapeHtml(cut(t.q, 30)) + '</div>';
+        h += '</div>';
+      }
+      h += '<div class="nself">它一句自我点检：' + escapeHtml(n.selfCheck) + '</div></div>';
+    }
+    $('wkNotes').innerHTML = h;
+  } else {
+    $('wkNotes').innerHTML = '';
+  }
+
+  // —— P0-1：确定性薄弱点定位（机器读你讲解文本读出的"可能讲漏/讲偏"信号，给 AI 当追问靶子）——
+  const wp = ev.weakPoints || [];
+  if (wp.length) {
+    const seen = new Set(); let h = '<h3 class="kai">这节课你讲得偏薄的地方（确定性定位）</h3>';
+    h += '<p class="fine">下面是机器读你讲解文本读出的"可能讲漏 / 讲偏"信号——不是给你打分，是给 AI 学生当追问靶子的依据。你对着看看是不是真漏了。</p>';
+    for (const w of wp) {
+      const key = w.conceptIdx + '|' + w.signal;
+      if (seen.has(key)) continue; seen.add(key);
+      h += '<div class="wcard">· 讲「' + escapeHtml(w.concept) + '」时露出“' + escapeHtml(w.signalLabel) + '”——「' + escapeHtml(w.evidence) + '」</div>';
+    }
+    $('wkWeak').innerHTML = h;
+  } else {
+    $('wkWeak').innerHTML = '<p class="fine">这节课没检出明显的讲漏信号。</p>';
+  }
 
   // —— 抽屉：内部数据一个不删，但要主动点开才看见 ——
   lastDoneEv = ev;

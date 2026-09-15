@@ -303,6 +303,124 @@ function probeSummaryLine(counts) {
   return named.map((x) => `${x.label} ${x.n}`).join(' · ');
 }
 
+// ================== 确定性薄弱点定位层（P0-1，2026-09-15 加）==================
+// 设计哲学（见 docs/理论基座.md §四）：AI 学生不做被计算的对象、不评分；但"照出人类盲区"必须**确定性**——
+// 不靠 LLM 自由发挥猜人类哪里讲漏了（那会退化成"不管输入什么他们都回那几句"）。
+// 本层对人类讲解文本做**可解释、可复现**的弱信号检测，把"可能讲漏 / 讲偏"的位置钉出来，
+// 喂给探针调度：哪枚探测去逼哪个口子，有依据。
+//
+// 五类理解漏洞信号（来自认知科学 / 可教代理研究；确定性正则，跨场景取值必不同，否则是摆设）：
+//   jargon   用术语未解释   —— 专业词出现但同句邻句无解释标记
+//   jump     逻辑跳跃 A→C   —— 推理词出现但前句无前提标记（缺中间的 B）
+//   abstract 具体→抽象      —— 抽象词出现但本句无生活例 / 数字锚点
+//   parrot   用原话非自己话 —— 连续两句高度重复（疑似背定义）
+//   omit     前提盲区(WYSIATI)—— 把断言讲成定论却没给启用条件（Kahneman 2011：缺失前提不"感觉"缺失）
+// 五类信号 → 六类探测映射（确定性，证据见理论基座.md §四.3 / §十.11 / §十.12）：
+//   jargon→example  jump→mechanism  abstract→counter  parrot→apply  omit→bound
+// 调度优先级：omit/jump 且带高信心标记 → 严重度 +1（上限 5），优先钉（hypercorrection 最高收益窗口）。
+
+function wpKeywordsOf(c) {
+  const raw = String(c || '').replace(/[「」""'']/g, '').trim();
+  const parts = raw.split(/[\s,，、；;。]+/).map((w) => w.trim()).filter((w) => w.length >= 2);
+  return parts.length ? parts : [raw.slice(0, 6)];
+}
+const WP_JARGON = /([一-龥A-Za-z]{2,}(?:定律|定理|效应|模型|函数|方程|理论|算法|机制|原理|概念|范式|熵|梯度|矩阵|向量|微分|积分|拓扑|群|环|域|映射|算子|场|势|流形))/;
+const WP_INFER = /(所以|因此|于是|这就|说明|可见|推出|意味着|换句话说|归根到底|一句话|关键是|要记住)/;
+const WP_PREM = /(因为|由于|前提|条件是|需要|基于|假设|首先|第一步)/;
+const WP_ABSTRACT = /(本质|规律|核心|根本|抽象|意义上|层面|维度|结构|框架|范式|底层|底层逻辑)/;
+const WP_CONCRETE = /(比如|例如|我|生活|见过|去年|上次|实际|具体|数字|\d|％|%|％)/;
+// —— 第 5 类信号：前提盲区（WYSIATI / Kahneman 2011）——
+// 人用已有信息拼出自洽故事、把没说的前提当成"不存在"。钉：把断言陈述成确定/普适、却没给启用条件。
+// 命中条件（确定性，降误报）：① 含确定/普适标记 ② 含"成立/适用/有效"等断言动词 ③ 无弱化语 ④ 非问句。
+const WP_CERTAIN = /(一定|肯定|必然|当然|总是|永远|全都|都是|所有|无一例外|毫无例外|没有例外|就是|注定)/;
+const WP_QUAL = /(除非|除了|例外|除外|前提|不一定|未必|可能|也许|有时候|某些情况|大多数|通常|一般|往往|如果.*(不成立|不)|并非所有|例外情况)/;
+const WP_CLAIM = /(适用|成立|正确|有效|能|会|是|对|没问题|行得通|靠谱|管用|错不了)/;
+// 高信心标记（用于"高信心缺口优先"，见下 wpSeverityOf）：定论式、毋庸质疑的口吻。
+// 来源：hypercorrection effect（Metcalfe & Butterfield 2001）——人对高信心错误反而纠正得最持久，
+//       因为"自信却错了"触发元认知惊讶→注意捕获→编码增强。故 P0-1 调度应优先钉高信心缺口。
+const WP_ASSERT_CONF = /(显然|毫无疑问|肯定|必定|铁定|就是|注定|绝对|永远|一定|毋庸置疑|明摆着)/;
+const WP_SIGNAL_LABEL = {
+  jargon: '用了术语却没解释',
+  jump: '逻辑跳了一步（缺中间环节）',
+  abstract: '突然从具体飞到抽象',
+  parrot: '像是照本宣科',
+  omit: '把断言讲成了定论，却没说启用条件（你默认了什么前提）',
+};
+const WP_SEVERITY = { jargon: 2, jump: 3, abstract: 1, parrot: 1, omit: 3 };
+const WP_STRATEGY = { jargon: 'example', jump: 'mechanism', abstract: 'counter', parrot: 'apply', omit: 'bound' };
+function weakPointToProbeType(signal) { return WP_STRATEGY[signal] || 'apply'; }
+
+// 严重度（基线 + 高信心缺口优先 boost）
+// 基线见 WP_SEVERITY；当信号是 omit/jump 且句子带高信心标记时 +1（上限 5），
+// 让"定论式断言却缺前提/跳步"的薄弱点排在调度最前 → 命中 hypercorrection 最高收益窗口。
+function wpSeverityOf(sig, sent) {
+  let s = WP_SEVERITY[sig] || 1;
+  if ((sig === 'omit' || sig === 'jump') && WP_ASSERT_CONF.test(sent)) s = Math.min(5, s + 1);
+  return s;
+}
+
+// 单句弱信号检测：返回命中的信号数组（可多个）
+function sentenceSignals(sent, prevSent) {
+  const out = [];
+  if (WP_JARGON.test(sent) && !CLARIFY_MARK.test(sent)) out.push('jargon');
+  if (WP_INFER.test(sent) && prevSent && !WP_PREM.test(prevSent)) out.push('jump');
+  if (WP_ABSTRACT.test(sent) && !WP_CONCRETE.test(sent)) out.push('abstract');
+  // 第 5 类：前提盲区（WYSIATI）。确定/普适断言 + 含成立动词 + 无弱化语 + 非问句。
+  if (WP_CERTAIN.test(sent) && WP_CLAIM.test(sent) && !WP_QUAL.test(sent)
+      && !/[？?]$/.test(sent.trim()) && sent.trim().length > 8) out.push('omit');
+  return out;
+}
+// 跨句重复检测（parrot）：本句与上一句 bigram 重叠率 > 0.7 且都较长
+function isParrot(sent, prevSent) {
+  if (!prevSent || sent.length < 8) return false;
+  const clean = (s) => String(s).replace(/[^\u4e00-\u9fa5A-Za-z0-9]/g, '');
+  const ta = clean(sent), tb = clean(prevSent);
+  const A = new Set(), B = new Set();
+  for (let i = 0; i < ta.length - 1; i++) A.add(ta.slice(i, i + 2));
+  for (let i = 0; i < tb.length - 1; i++) B.add(tb.slice(i, i + 2));
+  if (!A.size || !B.size) return false;
+  let hit = 0; for (const x of A) if (B.has(x)) hit++;
+  return hit / A.size > 0.7;
+}
+
+// 主入口：对人类讲解文本做确定性弱信号检测，返回按严重度降序的薄弱点列表。
+// 入参：lessonText（人类原话）、concepts（extractConcepts 结果）
+// 返回：[{conceptIdx, concept, signal, signalLabel, strategy, probeType, evidence, severity}]
+// ⚠️ 诚实标注：detectWeakPoints 只分析**人类文本**里的表达特征，不声称知道 AI 学生"懂没懂"；
+//   它钉出的是"人类可能讲漏的地方"，是给探针调度当目标的依据，不是对学生的判定。
+function detectWeakPoints(lessonText, concepts) {
+  const M = Array.isArray(concepts) ? concepts.length : 0;
+  const kw = Array.from({ length: M }, (_, j) => wpKeywordsOf(concepts[j]));
+  const sents = String(lessonText || '').split(/[。！？；\n]+/).map((s) => s.trim()).filter(Boolean);
+  const found = [];
+  for (let i = 0; i < sents.length; i++) {
+    const sent = sents[i], prev = i > 0 ? sents[i - 1] : '';
+    const sigs = sentenceSignals(sent, prev);
+    if (isParrot(sent, prev)) sigs.push('parrot');
+    if (!sigs.length) continue;
+    const hitIdx = [];
+    for (let j = 0; j < M; j++) if (kw[j].some((k) => sent.includes(k))) hitIdx.push(j);
+    const anchors = hitIdx.length ? hitIdx : (M ? [i % M] : [0]);
+    for (const sig of sigs) {
+      for (const j of anchors) {
+        found.push({
+          conceptIdx: j,
+          concept: concepts[j] || concepts[0] || '这个说法',
+          signal: sig,
+          signalLabel: WP_SIGNAL_LABEL[sig],
+          strategy: WP_STRATEGY[sig],
+          probeType: weakPointToProbeType(sig),
+          evidence: sent.slice(0, 22),
+          severity: wpSeverityOf(sig, sent),
+        });
+      }
+    }
+  }
+  // 严重度降序；同严重度按概念序，保证可复现
+  found.sort((a, b) => (b.severity - a.severity) || (a.conceptIdx - b.conceptIdx));
+  return found;
+}
+
 // ================== 教师元认知收益层（需求⑥：教中学 / protégé effect + IOED + 费曼）==================
 // 用户原话：「查找外部资料，看看怎么会让使用的人，从讲授给别人听，获得自己的东西」。
 // 即：让人（教师）通过把知识讲授给 AI 学生，反过来获得属于自己的理解深化、盲区暴露、元认知校准。
@@ -478,6 +596,8 @@ module.exports = {
   guessMisconception, teacherPoints, isClarifying, bigrams, overlapScore, addressScore, quotable,
   // 探测层（2026-09-11：学生从"被计算"改成"照盲区"）
   PROBE_TYPES, PROBE_LABELS, classifyProbe, probeLabel, probeCounts, probeSummaryLine,
+  // 确定性薄弱点定位层（P0-1：分析人类讲解文本的弱信号，钉探针目标）
+  detectWeakPoints, weakPointToProbeType,
   // 教师元认知收益层（教中学）
   jargonMaskedQuotes, teacherDiagnosis, teacherReport,
 };

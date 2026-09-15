@@ -117,6 +117,30 @@ function proofSkeleton(lessonText) {
   return { premises, inferences, conclusions, complete: premises.length > 0 && (inferences.length + conclusions.length) > 0 };
 }
 
+// P0-2：AI 理解笔记（镜子）确定性拼装（与 teacher.js finalize 同构；此处作 fallback，主路径用 ev.aiNotes）。
+// 全用真实文本：旧想法 + 它记下的先生原话 + 它没搞清的 + 一句自我点检。不评分、不声称它"懂了"。
+function buildAiNotes(probeList, students) {
+  if (!students || !students.length) return [];
+  return students.map((s) => {
+    const name = s.name;
+    const mine = probeList.filter((p) => p && p.name === name);
+    const took = mine.filter((p) => p.answer != null)
+      .map((p) => ({ round: p.round, type: p.type, q: p.say, answer: p.answer }));
+    const stuck = mine.filter((p) => p.answer == null)
+      .map((p) => ({ round: p.round, type: p.type, q: p.say }));
+    const sharp = stuck[0] || mine[0];
+    const selfCheck = sharp
+      ? `我原来以为「${SHORT(s.mis, 18)}」；最想不通的是「${SHORT(sharp.say, 22)}」`
+      : '这课我没什么想不通的——但也可能只是我没敢问。';
+    return {
+      name, mis: s.mis, took, stuck, selfCheck,
+      note: took.length
+        ? `记下了：${took.map((t) => `「${SHORT(t.answer, 16)}」`).join('；')}。${selfCheck}`
+        : selfCheck,
+    };
+  });
+}
+
 // ---- 主入口 ----
 export function buildSummary(ev, opts = {}) {
   const { heatEnergy = 0, heatRef = 4 } = opts;
@@ -146,6 +170,9 @@ export function buildSummary(ev, opts = {}) {
     .map((p) => ({ name: p.name, q: p.say, answer: p.answer, type: p.type, round: p.round }));
   const openQ = probeList.filter((p) => p && p.answer == null)
     .map((p) => ({ name: p.name, q: p.say, type: p.type, round: p.round }));
+
+  // P0-2：AI 理解笔记（镜子）。teacher.js 已在 finalize 算好 ev.aiNotes；此处有则直接用，无则从 probes/students 现场拼。
+  const aiNotes = (ev && ev.aiNotes && ev.aiNotes.length) ? ev.aiNotes : buildAiNotes(probeList, (ev && ev.students) || []);
 
   // 信息论：你的"强调分布"的 Shannon 熵 —— 你把注意力平摊在多处（H 高），还是全压在一个点（H 低）。
   //   这一项**只关于你自己的讲解文本**，不涉及任何对学生脑子的估计。
@@ -233,6 +260,7 @@ export function buildSummary(ev, opts = {}) {
     // 关于 AI 学生的量：**只有计数与原文**，没有任何"他懂了多少""你答到了多少"的判定
     probes: { total: probeTotal, answered, open: probeOpen, kinds: probeKinds, line: gains.probeLine || '' },
     pairs, openQ,                        // 逐条并列：他问的 / 你答的；以及你没回的
+    aiNotes,                            // P0-2：AI 理解笔记（镜子，含它没搞懂的）
     emphasis: { attn, dist: aDist.map((x) => Number(x.toFixed(3))), entropy: emphasisEnt, top: M ? topJ : -1 },
     clarifyRatio,
     flow: { challenge: Number(challenge.toFixed(3)), gap: Number(gap.toFixed(3)), trajectory },
@@ -255,7 +283,7 @@ export function summaryToMarkdown(s) {
   L.push('');
   L.push('## 一、你的四感');
   L.push('');
-  L.push('| 感受 | 分数 | 说明 |');
+  L.push('| 感受 | 数值 | 说明 |');
   L.push('|---|---|---|');
   L.push(`| 体验感 | ${pct(s.senses.experience.value)} | 课堂真的发生了：${s.graph.nodes} 个概念、${s.flow.trajectory.length} 轮对话被你接进世界。 |`);
   L.push(`| 游戏感 | ${pct(s.senses.game.value)} | 概念难度与你解释深度（前提/例子/边界占比）的贴合度。 |`);
@@ -285,25 +313,47 @@ export function summaryToMarkdown(s) {
     for (const p of s.openQ) L.push(`- ${p.name} 第 ${p.round} 轮［${PROBE_KIND[p.type] || '探测'}］${p.q}`);
   }
   L.push('');
-  L.push('## 三、你的知识结构图（图论）');
+  L.push('## 三、AI 理解笔记（镜子，含它没搞懂的）');
+  L.push('');
+  L.push('> 这不是给 AI 学生打分，是把它们当镜子——它们记下的、没搞清的，正把你讲解里的口子镜像回来。');
+  L.push('> 数据不删、不对外、不评分；下面引用的是它们的原话和你（先生）的原话。');
+  L.push('');
+  for (const n of (s.aiNotes || [])) {
+    L.push(`### ${n.name}`);
+    L.push(`- 进课堂前的旧想法：${n.mis}`);
+    if (n.took && n.took.length) {
+      L.push('- 它记下的（先生原话）：');
+      for (const t of n.took) L.push(`  - 第${t.round}轮［${PROBE_KIND[t.type] || '探测'}］它问：${SHORT(t.q, 30)} → 先生答：「${SHORT(t.answer, 36)}」`);
+    } else {
+      L.push('- 这一课它没接到你的回答（或没怎么问）。');
+    }
+    if (n.stuck && n.stuck.length) {
+      L.push('- 它还没搞清的（你没回到的口子）：');
+      for (const t of n.stuck) L.push(`  - 第${t.round}轮［${PROBE_KIND[t.type] || '探测'}］${SHORT(t.q, 30)}`);
+    }
+    L.push(`- 它一句自我点检：${n.selfCheck}`);
+    L.push('');
+  }
+  L.push('');
+  L.push('## 四、你的知识结构图（图论）');
   L.push('');
   L.push(`- 节点（概念）：${s.graph.nodes}　边（依赖）：${s.graph.edgeCount}　最大深度：${s.graph.maxDepth}`);
   L.push(`- 根（先讲这个）：${s.graph.roots.map((i) => i + 1).join('、') || '—'}　叶（最后落这里）：${s.graph.leaves.map((i) => i + 1).join('、') || '—'}`);
   L.push(`- 枢纽（讲了它其余就顺）：${s.graph.hubs.map((i) => i + 1).join('、') || '—'}　有无环：${s.graph.hasCycle ? '有（注意循环论证）' : '无（DAG）'}`);
   L.push('');
-  L.push('## 四、你的注意力分布（信息论）');
+  L.push('## 五、你的注意力分布（信息论）');
   L.push('');
   L.push(`- 各要点被讲到的句数占比：${s.emphasis.dist.map((p, i) => `第${i + 1}个 ${(p * 100).toFixed(0)}%`).join('　')}`);
   L.push(`- 强调分布熵（归一到 [0,1]）= ${s.emphasis.entropy}${s.emphasis.top >= 0 ? `　讲得最多的是第 ${s.emphasis.top + 1} 个` : ''}`);
   L.push(`- 你回答的澄清度（带前提/例子/边界的占比）= ${(s.clarifyRatio * 100).toFixed(0)}%`);
   L.push('');
-  L.push('## 五、本课用到的数学（理论感）');
+  L.push('## 六、本课用到的数学（理论感）');
   L.push('');
   L.push('| 分支 | 数学对象 | 你的值 | 对你意味着什么 |');
   L.push('|---|---|---|---|');
   for (const t of s.theory) L.push(`| ${t.branch} | ${t.math} | ${t.value} | ${t.meaning} |`);
   L.push('');
-  L.push('## 六、下一步（把实践变理论）');
+  L.push('## 七、下一步（把实践变理论）');
   L.push('');
   L.push('1. 挑上面 **枢纽概念**，用一句"所以"把它与**根概念**连起来——这就补上了你的证明骨架。');
   if (s.openQ.length) L.push(`2. 先回一下你没回的那 ${s.openQ.length} 枚探测——它们没人有机会被回答，但最可能戳到你的口子。`);

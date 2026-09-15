@@ -36,7 +36,11 @@ const {
   guessMisconception, teacherPoints, isClarifying, quotable,
   teacherDiagnosis, teacherReport,
   PROBE_TYPES, classifyProbe, probeLabel, probeCounts, probeSummaryLine,
+  detectWeakPoints, weakPointToProbeType,
 } = require('./teaching.js');
+const {
+  buildQuestionSpec, renderWpHint, inferResponseMode,
+} = require('./questioning.js');   // TCMQ 确定性提问引擎（提问方法论解耦为独立模块）
 
 const KEY = process.env.LINGJING_OR_KEY || '';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -446,7 +450,7 @@ function parseTurn(raw, n, self) {
 //      依据 VanLehn (2003)：学习只在学生到达 impasse 之后发生，学生不制造卡点，讲得再好也没用。
 async function studentTurn(st, ctx) {
   const { i, round, lessonText, lessonTitle, concepts,
-          teacherReply, peerLines, target, kind, deadline } = ctx;
+          teacherReply, peerLines, target, kind, deadline, wpHint } = ctx;
   const pt = PROBE_TYPES.find((p) => p.key === kind) || PROBE_TYPES[1];
   const sys =
     `你是民国学堂里的学生「${st.name}」，${st.trait}。你不是助手，你就是这个学生本人。\n` +
@@ -474,6 +478,7 @@ async function studentTurn(st, ctx) {
     `你上轮说过：${st.last || '（还没发过言）'}\n` +
     `你进课堂前的旧想法：${st.mis}\n` +
     `这轮你要做的事：${ctx.role}\n` +
+    (wpHint ? `🔎 ${wpHint}\n` : '') +
     `可以拿你的旧想法对照，可以和同学争；别说客套话；别重复自己说过的。两行。`;
 
   const raw = await orChat(sys, usr, { maxTokens: 220, temperature: 0.85 + (i % 5) * 0.03, deadline });
@@ -492,6 +497,13 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
   const lessonText = lesson.content;
   const concepts = extractConcepts(lessonText, lesson.concepts);   // 定义1（须先于学生创建：前概念要挂到概念上）
   const difficulties = concepts.map(estimateDifficulty);
+
+  // P0-1 确定性薄弱点定位：对整段讲解做一次性检测（人类文本里的弱信号），作为探针调度的目标库。
+  // 每轮老师回话后，也会把回话文本补检进池子（人类回答里同样可能跳步 / 甩术语）。
+  // weakConsumed 保证同一薄弱点只被一枚探测钉一次；weakHits 计数"被定位钉死的探测"数（事实，非判定）。
+  const weakPool = detectWeakPoints(lessonText, concepts);
+  const weakConsumed = new Set();
+  let weakHits = 0;
 
   const students = PERSONALITIES.map((p, i) => ({
     id: w.addAgent({ kind: 'agent', name: p.name, profession: 'student' }),
@@ -540,21 +552,46 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
     const turns = new Array(students.length);
     const BATCH = Math.max(1, Math.min(5, Number(process.env.LINGJING_CONC) || 2));
     const deadline = Date.now() + LLM_BUDGET_MS;   // 本轮 LLM 时间预算（超出用兜底补齐）
+
+    // P0-1：老师这轮回话里的文本，同样可能露出"甩术语 / 跳步"——补检进薄弱点池，让后续探测钉准。
+    if (teacherReply) {
+      for (const w of detectWeakPoints(teacherReply, concepts)) weakPool.push(w);
+    }
+
     for (let s0 = 0; s0 < students.length; s0 += BATCH) {
       const idx = [];
       for (let k = s0; k < Math.min(s0 + BATCH, students.length); k++) idx.push(k);
       const res = await Promise.all(idx.map((k, t) => (async () => {
         if (t) await sleep(250);
-        // 本轮探测任务：盯哪个要点（串开，一轮内 5 人不撞车）、抛哪一类（六类错开）
-        const target = probeTarget(concepts, k, round);
-        const kind = probeKind(k, round);
+        // 本轮探测任务：优先把这一枚探测钉到"未消耗、严重度最高"的薄弱点上（确定性定位）；
+        // 没有可用薄弱点时，退回原来的串开轮转（probeTarget / probeKind）保证概念覆盖。
+        let wp = null;
+        for (const w of weakPool) { if (!weakConsumed.has(w)) { wp = w; break; } }
+        let target, kind, targetIdx, wpHint = '';
+        const humanUtter = teacherReply || lessonText;
+        if (wp) {
+          weakConsumed.add(wp); weakHits++;
+          target = wp.concept;
+          kind = wp.probeType;
+          targetIdx = wp.conceptIdx;
+        } else {
+          target = probeTarget(concepts, k, round);
+          kind = probeKind(k, round);
+          targetIdx = (((k + round - 1) % Math.max(1, concepts.length)) + Math.max(1, concepts.length)) % Math.max(1, concepts.length);
+        }
+        // TCMQ 确定性提问引擎：把"钉谁/什么类型/引哪句原话/第几层/等多久"算成 spec，LLM 只负责用中文说出口。
+        const spec = buildQuestionSpec({
+          target, probeType: kind, weakPoint: wp || null,
+          humanLastUtterance: humanUtter, responseMode: inferResponseMode(teacherReply), round,
+        });
+        wpHint = renderWpHint(spec);
         const base = PROBE_ROLES[kind](target);
         const role = round <= 1 ? base : FOLLOW_PREFIX[(k + round) % FOLLOW_PREFIX.length] + base;
         return studentTurn(students[k], {
           i: k, round, lessonTitle, lessonText, concepts,
           teacherReply: teacherReply || '',
-          peerLines, deadline, target, kind, role,
-          targetIdx: (((k + round - 1) % Math.max(1, concepts.length)) + Math.max(1, concepts.length)) % Math.max(1, concepts.length),
+          peerLines, deadline, target, kind, role, wpHint,
+          targetIdx,
         });
       })()));
       idx.forEach((k, t) => { turns[k] = res[t]; });
@@ -754,6 +791,34 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
       })),
     }));
 
+    // P0-2：AI 理解笔记（镜子，确定性拼装，不评分不对外）。
+    // 机制（见 docs/理论基座.md §五）：可教代理的硬结论——镜子该把它"学到的"（=人类教的）暴露回给人类，
+    // 含它可能理解错的地方，人类读到"它理解岔了"才照见自己哪句讲歧义了。
+    // 本产品不声称 AI 有理解，所以这里全用真实文本拼：旧想法 + 它记下的先生原话 + 它没搞清的 + 一句自我点检。
+    // "含错"天然落在两处：没收到的回答（它没得到澄清）+ 它的旧想法 mis（它带着的错）——正把人类盲区镜像回给人。
+    const aiNotes = students.map((s) => {
+      const mine = probes.filter((p) => p && p.name === s.name);
+      const took = mine.filter((p) => p.answer != null)
+        .map((p) => ({ round: p.round, type: p.type, q: p.say, answer: p.answer }));
+      const stuck = mine.filter((p) => p.answer == null)
+        .map((p) => ({ round: p.round, type: p.type, q: p.say }));
+      // 自我点检：确定性模板，最尖的那枚没回的探测优先，其次第一枚探测，都没有则标"这课没怎么问"
+      const sharp = stuck[0] || mine[0];
+      const selfCheck = sharp
+        ? `我原来以为「${quotable(s.mis, 20)}」；先生讲完，我最想不通的是「${quotable(sharp.say, 24)}」`
+        : `这课我没什么想不通的——但也可能只是我没敢问。`;
+      return {
+        name: s.name,
+        mis: s.mis,                         // 进课堂前的旧想法（已知，非估测）
+        took,                              // 它"记下的"：先生原话 + 它抛的探测（逐条）
+        stuck,                             // 它没搞清的：没收到的回答（=人类没讲到的口子）
+        selfCheck,                         // 一句自我点检（确定性模板，非 LLM 生成）
+        note: took.length
+          ? `先生说的我都记下了：${took.map((t) => `「${quotable(t.answer, 18)}」`).join('；')}。${selfCheck}`
+          : selfCheck,
+      };
+    });
+
     onLog(`你的收获：要点 ${gains.points} 条 · 澄清型回答 ${gains.clarifying}/${gains.replies} · 学生抛出探测 ${gains.probes} 枚`
       + `${gains.probeLine ? '（' + gains.probeLine + '）' : ''} · 其中 ${gains.answered} 枚你回了、${gains.probes - gains.answered} 枚没回`
       + `（"答到没有"由你在课后逐条判——机器只能数词，不能读心）`
@@ -777,6 +842,9 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
       minutes,        // 五生共同的《课堂纪要》（作品）
       teacherGain: teacherDiag,    // 教中学：教师自身盲区诊断（需求⑥）
       teacherReportMd,            // 教中学：教师人话"我的收获"报告（需求⑥核心交付物）
+      weakPoints: weakPool,       // P0-1：确定性检测出的"人类可能讲漏/讲偏"的位置（分析人类文本，非对学生判定）
+      weakPointHits: weakHits,    // P0-1：其中被探针钉死的枚数（事实计数，非分数）
+      aiNotes,                    // P0-2：AI 理解笔记（镜子，含它没搞懂的）——确定性拼装，不评分不对外
       teacherGainFile,            // 教中学报告落盘路径
     };
     done = true;
