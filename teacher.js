@@ -188,9 +188,15 @@ function cleanSay(s) {
   if (/thinking process|user safety|analyze the|here's|<\/?think>|^```/i.test(line)) return '';
   const ascii = (line.match(/[A-Za-z]/g) || []).length;
   if (ascii > 0 && ascii / Math.max(1, line.length) > 0.3) return ''; // 大半是英文 → 判定泄漏
+  // 剥开头泄漏的元指令标签（craft: / answer: / 类型： / 第2行： 等模型把内部提示词带进了嘴）
+  line = line.replace(/^[A-Za-z\u4e00-\u9fa5]{1,14}[:：]\s*/i, '')
+            .replace(/^第\s*\d+\s*行\s*[:：]\s*/i, '')
+            .replace(/^(类型|标签|探测类型|type|answer|response|reply|output|note)\s*[:：]\s*/i, '');
   line = line.replace(/[*`#>「」"]/g, '').replace(/^[^：:]{1,6}[：:]\s*/, '').trim();
-  line = line.replace(/^[A-Za-z][A-Za-z'’-]{0,20}[:：]?\s*[（(]?/, (m) => (/[\u4e00-\u9fa5]/.test(m) ? m : '')); // 剥掉开头的英文碎片（Let's count: 等）
-  line = line.replace(/^[A-Za-z\s'’\-]{0,24}(?=[\u4e00-\u9fa5])/, '');
+  line = line.replace(/^[A-Za-z][A-Za-z'’-]{0,20}[:：]?\s*[（(]?/, (m) => (/[\u4e00-\u9fa5]/.test(m) ? m : ''));
+  line = line.replace(/^[A-Za-z\s'’\-:]{0,24}(?=[\u4e00-\u9fa5])/, ''); // 含 ":" 才能吃掉 "craft:" 这类前缀
+  // 剥尾部泄漏的元指令（免费模型有时把 "Count characters:" / "字数" 这类提示回显到句尾）
+  line = line.replace(/\s*(?:count characters|character count|char count|字数|字符数|note)\s*[:：]?\s*[^\n。？！]*$/i, '');
   const zh = (line.match(/[\u4e00-\u9fa5]/g) || []).length;
   if (zh < 4) return '';                                  // 太短 → 多半是残句
   if (/[(（【[「,，、:：]$/.test(line)) return '';          // 截断在半句 → 丢弃
@@ -207,7 +213,8 @@ function pickChineseLine(raw, self) {
     const m = line.match(/^(小明|小红|小刚|小丽|小华|先生|老师|学生)\s*[:：]\s*/);
     if (m && (!self || m[1] !== self)) continue;          // 只放行"自己的名字"，别人的算串台
     const body = (m ? line.slice(m[0].length) : line)
-      .replace(/^[A-Za-z\s'’\-]{0,24}(?=[\u4e00-\u9fa5])/, '').trim();
+      .replace(/^[A-Za-z\u4e00-\u9fa5]{1,14}[:：]\s*/i, '')
+      .replace(/^[A-Za-z\s'’\-:]{0,24}(?=[\u4e00-\u9fa5])/, '').trim();
     const zh = (body.match(/[\u4e00-\u9fa5]/g) || []).length;
     const asc = (body.match(/[A-Za-z]/g) || []).length;
     if (zh >= 6 && asc <= zh * 0.6) return body.slice(0, 60);
@@ -220,6 +227,24 @@ function pickChineseLine(raw, self) {
 // 加上模型天生爱说漂亮话，结果就是"不管我输入什么，他们都回那几句"。
 // 现在目标由 (学生序号 + 轮次) 决定：**5 个学生自动分散到不同要点上**——人类讲了 5 个要点，
 // 就有 5 个方向被同时探测，一次能看见自己整段讲解上所有的洞；六类探测按轮次错开，4 轮覆盖全六类。
+// 课堂纪要：LLM 可能把内部规划草稿（"We need to output markdown..."）当正文返回，
+// 这种 CoT 泄漏必须拦下，否则课后交付物是废品。拦下则回退到本地拼装（见 buildMinutes 兜底）。
+function looksLikeCoT(s) {
+  if (!s) return true;
+  const t = String(s).trim();
+  if (/we need to|let'?s (extract|output|think|write)|let me|here'?s (a|the)|first,?\s|i (will|need to)|step \d|below is|as an ai/i.test(t)) return true;
+  const head = t.slice(0, 240);
+  const zh = (head.match(/[\u4e00-\u9fa5]/g) || []).length;
+  const en = (head.match(/[A-Za-z]/g) || []).length;
+  if (en > zh) return true; // 开头大半是英文 → 规划草稿
+  return false;
+}
+function extractMarkdown(raw) {
+  const text = String(raw || '').trim();
+  const i = text.search(/^#{1,6}\s|^\s*[-*]\s|^\s*\d+\.\s/m);
+  return (i > 0 ? text.slice(i) : text).trim();
+}
+
 const PROBE_ROLES = {
   counter:   (c) => `针对「${c}」，先说出你原来以为的样子（你的旧想法），再问先生：有没有反过来也成立的情况？`,
   bound:     (c) => `针对「${c}」，问先生：什么情况下它就不成立了？界限在哪儿？`,
@@ -606,7 +631,7 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
         `课堂实录：\n${memory.map((m) => `${m.speaker}：${m.text}`).join('\n')}\n\n` +
         `我们各自的旧想法：\n${students.map((s) => `- ${s.name}：${s.mis}`).join('\n')}\n`;
       const md = await orChat(sys, usr, { maxTokens: 700, timeoutMs: 25000 });
-      if (md && md.length > 60) return { md: md.trim(), by: 'LLM 五生合写' };
+      if (md && md.length > 60 && !looksLikeCoT(md)) return { md: extractMarkdown(md), by: 'LLM 五生合写' };
     }
     // 兜底：由本场真实的发言与前概念拼装（不是凭空生成）
     const md = [
