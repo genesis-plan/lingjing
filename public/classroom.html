@@ -170,8 +170,28 @@
   #jserr{ position:fixed; left:8px; bottom:8px; z-index:99; display:none; max-width:60vw;
     background:#7f1d1d; color:#fff; padding:8px 12px; border-radius:8px; font-size:12px; font-family:monospace; }
 </style>
+<style>
+/* 双稿·照镜札记（reflection.js 解耦引擎驱动的课后总结；不参与体验层） */
+.reflect{ margin-top:14px; border-top:1px dashed rgba(216,180,106,.4); padding-top:12px; }
+.reflect h3.kai{ color:var(--gold); margin:.2em 0 .4em; }
+.reflect .draft{ background:rgba(0,0,0,.25); border:1px solid rgba(216,180,106,.3); border-radius:8px; padding:10px 12px; margin:8px 0; }
+.reflect .tag{ display:inline-block; font-size:12px; color:#0d0906; background:var(--gold); border-radius:4px; padding:1px 6px; margin-bottom:6px; }
+.reflect .blk{ margin:6px 0 2px; }
+.reflect .blk b{ color:var(--gold); }
+.reflect .fine{ color:#b9a883; font-size:12px; line-height:1.65; }
+.reflect textarea{ width:100%; min-height:52px; box-sizing:border-box; background:rgba(0,0,0,.3); color:var(--ink);
+  border:1px solid rgba(216,180,106,.35); border-radius:6px; padding:8px; font-family:inherit; font-size:13px; resize:vertical; }
+.reflect .zh{ margin:10px 0; }
+.reflect .zh label{ display:block; color:var(--gold); margin-bottom:4px; font-size:14px; }
+.reflect button.final{ margin-top:6px; background:var(--seal); color:#fff; border:none; border-radius:6px; padding:8px 16px; cursor:pointer; font-family:inherit; font-size:14px; }
+.reflect .out{ margin-top:10px; white-space:pre-wrap; background:rgba(0,0,0,.25); border-left:3px solid var(--gold); padding:10px 12px; border-radius:0 6px 6px 0; font-size:13px; line-height:1.7; }
+.reflect details.gj{ margin:10px 0; background:rgba(0,0,0,.18); border:1px solid rgba(216,180,106,.25); border-radius:8px; padding:6px 12px; }
+.reflect details.gj summary{ cursor:pointer; color:var(--gold); font-size:13px; padding:4px 0; }
+.reflect details.gj .fine{ margin:2px 0; }
+</style>
 </head>
 <body>
+<script src="reflection.js"></script>
 <script>
 window.__ERR=[];
 addEventListener('error',function(e){var d=document.getElementById('jserr');window.__ERR.push(String(e.message));
@@ -225,6 +245,7 @@ addEventListener('unhandledrejection',function(e){var d=document.getElementById(
       <div class="gain" id="wkGain"></div>
       <div class="notes" id="wkNotes"></div>
       <div class="weak" id="wkWeak"></div>
+      <div class="reflect" id="wkReflect"></div>
     </div>
     <div class="acts">
       <button id="copyMd">复制这份纪要</button>
@@ -476,6 +497,102 @@ function fillDrawer(ev){
   $('dNote').textContent = '「答到没」由你课后逐条对着清单自己判——机器只数你回了几枚、欠几枚，不替你下结论。'
     + '这一页的数据是给想深挖的人看的，课堂上不出现。';
 }
+// ---- 双稿·照镜札记（reflection.js 解耦引擎驱动；课后总结，不参与体验层）----
+let lastMirrorDraft = null, lastLessonTitle = '';
+const REFLECT_TITLES = { heard: '我听到的核心内容', confused: '我还没完全明白的地方', misread: '我可能理解偏了的地方' };
+function renderReflect(ev) {
+  const md = ev && ev.mirrorDraft;
+  const box = $('wkReflect');
+  const R0 = window.LJReflection;
+  if (!box) return;
+  if (!md || !md.students || !md.students.length) { box.innerHTML = ''; return; }
+  lastMirrorDraft = md; lastLessonTitle = ev.lessonTitle || '';
+  const L = [];
+  L.push('<h3 class="kai">双稿·镜鉴（AI 初稿 · 草稿·待你修订）</h3>');
+  L.push('<p class="fine">下面是你五个学生当镜子写下的「我听到的 / 我没跟上的 / 我可能理解偏了的」。全用「我」说，不评价不评分——你改完的才是真总结。</p>');
+  for (const s of md.students) {
+    L.push('<div class="draft"><span class="tag">草稿·待修订</span> <b>' + escapeHtml(s.name) + '</b>');
+    for (const key of ['heard', 'confused', 'misread']) {
+      const items = (s.blocks && s.blocks[key]) || [];
+      if (!items.length) continue;
+      L.push('<div class="blk"><b>' + REFLECT_TITLES[key] + '：</b></div>');
+      for (const it of items) L.push('<div class="fine">· ' + escapeHtml(it.text) + '</div>');
+    }
+    L.push('</div>');
+  }
+  // 引导式设问（LJ-GMR：基于镜稿三块，给"人"出可操作反思问题；只提问不评判）
+  const guided = (R0 && R0.buildGuidedPrompts) ? R0.buildGuidedPrompts(md) : [];
+  if (guided.length) {
+    L.push('<details class="gj"><summary>引导式设问（照完镜，用这些问题帮自己写定稿）</summary>');
+    for (const p of guided) L.push('<div class="fine">· ' + escapeHtml(p.text) + '</div>');
+    L.push('</details>');
+  }
+  L.push('<h3 class="kai">照镜札记（你来写定稿）</h3>');
+  L.push('<p class="fine">把上面照出的东西，写成你自己的总结。判定权在你——AI 不替你下结论。允许保留暂时无解的困惑。</p>');
+  L.push('<div class="zh"><label>一、事实（我讲了什么 / AI 听到了什么）</label><textarea id="rfFact" placeholder="待你写…"></textarea></div>');
+  L.push('<div class="zh"><label>二、反思（哪里顺 / 哪里卡 / 为什么）</label><textarea id="rfReflect" placeholder="待你写…"></textarea></div>');
+  L.push('<div class="zh"><label>三、行动（如果重讲一次，我会改变什么）</label><textarea id="rfAction" placeholder="待你写…"></textarea></div>');
+  L.push('<div class="zh"><label>四、保留（暂时无解的问题）</label><textarea id="rfReserve" placeholder="允许保留困惑…"></textarea></div>');
+  // 复盘四步 + 元认知自检（LJ-GMR：可选脚手架，帮人把这次讲透、把盲区看清）
+  const review = (R0 && R0.buildReviewPrompts) ? R0.buildReviewPrompts() : [];
+  const metacog = (R0 && R0.buildMetacogPrompts) ? R0.buildMetacogPrompts() : [];
+  if (review.length || metacog.length) {
+    L.push('<details class="gj"><summary>复盘四步 · 元认知自检（可选：用这套问题把这次讲透）</summary>');
+    if (review.length) {
+      L.push('<div class="fine"><b>复盘四步（联想复盘）：</b></div>');
+      for (const s of review) L.push('<div class="fine">· ' + escapeHtml(s.title) + '：' + escapeHtml(s.question) + '</div>');
+    }
+    if (metacog.length) {
+      L.push('<div class="fine"><b>元认知自检：</b></div>');
+      for (const a of metacog) L.push('<div class="fine">· ' + escapeHtml(a.title) + '：' + escapeHtml(a.question) + '</div>');
+    }
+    L.push('</details>');
+  }
+  L.push('<button class="final" id="rfFinal">定稿（存为人类终审版）</button>');
+  L.push('<div class="out" id="rfOut" style="display:none"></div>');
+  box.innerHTML = L.join('');
+  const btn = $('rfFinal'); if (btn) btn.onclick = onReflectFinal;
+}
+function onReflectFinal() {
+  const R = window.LJReflection;
+  if (!R || !lastMirrorDraft) { alert('反思引擎未加载，无法定稿。'); return; }
+  const fields = {
+    fact: ($('rfFact').value || '').trim(),
+    reflect: ($('rfReflect').value || '').trim(),
+    action: ($('rfAction').value || '').trim(),
+    reserve: ($('rfReserve').value || '').trim(),
+  };
+  const finalDraft = R.buildFinalDraft(R.initReflectionState(lastMirrorDraft), fields);
+  const out = $('rfOut');
+  if (out) {
+    out.style.display = 'block';
+    // 跨课成长轨迹：把历次保留困惑累积成一句话前缀（数据不删、不替人编造）
+    let pre = '';
+    try {
+      const all = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.indexOf('lingjing_zhaojing_') === 0) {
+          try { all.push(JSON.parse(localStorage.getItem(k))); } catch (e) {}
+        }
+      }
+      if (all.length > 1) {
+        const traj = all.reduce((t, fd) => R.accumulateTrajectory(t, fd), null);
+        if (traj && traj.entries.length > 1) {
+          pre = '（跨 ' + traj.entries.length + ' 课，你已积累 ' + traj.blindSpotCount
+            + ' 条保留困惑未删——下次课前回看它们。）\n\n';
+        }
+      }
+    } catch (e) {}
+    out.textContent = pre + R.reflectionToMarkdown(finalDraft);
+  }
+  try {
+    const key = 'lingjing_zhaojing_' + (lastLessonTitle || '课') + '_' + Date.now();
+    localStorage.setItem(key, JSON.stringify(finalDraft));
+  } catch (e) {}
+  const btn = $('rfFinal'); if (btn) btn.textContent = '已定稿（可继续修改后再次定稿）';
+}
+
 function renderWork(ev){
   const g = ev.gains || {}, m = ev.minutes || {};
   const title = ev.lessonTitle || '这一课';
@@ -550,6 +667,9 @@ function renderWork(ev){
   } else {
     $('wkWeak').innerHTML = '<p class="fine">这节课没检出明显的讲漏信号。</p>';
   }
+
+  // —— 双稿·照镜札记（reflection.js 引擎；展示 AI 镜稿 + 采集人定稿）——
+  renderReflect(ev);
 
   // —— 抽屉：内部数据一个不删，但要主动点开才看见 ——
   lastDoneEv = ev;

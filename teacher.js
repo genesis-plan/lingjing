@@ -41,6 +41,7 @@ const {
 const {
   buildQuestionSpec, renderWpHint, inferResponseMode,
 } = require('./questioning.js');   // TCMQ 确定性提问引擎（提问方法论解耦为独立模块）
+const reflection = require('./public/reflection.js');   // 双稿制确定性反思引擎（总结方法论解耦为独立模块）
 
 const KEY = process.env.LINGJING_OR_KEY || '';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -845,6 +846,8 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
       weakPoints: weakPool,       // P0-1：确定性检测出的"人类可能讲漏/讲偏"的位置（分析人类文本，非对学生判定）
       weakPointHits: weakHits,    // P0-1：其中被探针钉死的枚数（事实计数，非分数）
       aiNotes,                    // P0-2：AI 理解笔记（镜子，含它没搞懂的）——确定性拼装，不评分不对外
+      // 双稿制：把 P0-2 aiNotes 确定性转成锁死的「镜稿三块」（AI 初稿·待修订），供课后双稿 UI 用。不评分、不替人定稿。
+      mirrorDraft: reflection.buildMirrorDraft(aiNotes),
       teacherGainFile,            // 教中学报告落盘路径
     };
     done = true;
