@@ -209,7 +209,7 @@ addEventListener('unhandledrejection',function(e){var d=document.getElementById(
 
 <div id="board">
   <div class="plaque"><div class="t kai" id="boardTitle">灵境 · 课室</div></div>
-  <div class="sub kai" id="boardSub">你站在讲台上 · 5 名学生已在座，等你说第一句话</div>
+  <div class="sub kai" id="boardSub">你站在讲台上 · 1 名学生（镜子）已在座，等你说第一句话</div>
 </div>
 <div id="status">正在把学生请进教室…</div>
 <div id="mode"></div>
@@ -278,11 +278,11 @@ const CAST = [
   { name:'小丽', x:0.675, y:0.701, h:0.332 },
   { name:'小华', x:0.850, y:0.705, h:0.334 },
 ];
+let activeSeats = CAST;  // 渲染时按实际人数重排（单学生居中），layout() 共用
 const FIG = { '小明':'students/xiaoming.png','小红':'students/xiaohong.png','小刚':'students/xiaogang.png',
               '小丽':'students/xiaoli.png','小华':'students/xiaohua.png' };
 const FALLBACK_ROSTER = [
-  { name:'小明', trait:'好奇型' }, { name:'小红', trait:'严谨型' }, { name:'小刚', trait:'活泼型' },
-  { name:'小丽', trait:'害羞型' }, { name:'小华', trait:'自信型' },
+  { name:'小明', trait:'好奇型' },
 ];
 
 // P0-1 / P0-2：课后抽屉用的本地小工具（不依赖 summary.mjs 的模块作用域）
@@ -306,7 +306,7 @@ function layout(){
   fg.style.left = ox + 'px'; fg.style.width = dw + 'px';
   fg.style.top = (oy + FG_Y * dh) + 'px'; fg.style.height = ((1 - FG_Y) * dh) + 'px';
   fg.style.opacity = '1';
-  for (const c of CAST){
+  for (const c of activeSeats){
     const el = els[c.name]; if (!el) continue;
     el.root.style.left = (ox + c.x * dw) + 'px';
     el.root.style.top = (oy + (c.y - c.h) * dh) + 'px';
@@ -319,7 +319,8 @@ addEventListener('resize', layout);
 function buildCast(list){
   castLayer.innerHTML = ''; for (const k in els) delete els[k];
   const meta = {}; (list || []).forEach((s) => (meta[s.name] = s));
-  for (const c of CAST){
+  activeSeats = (list && list.length === 1) ? [{ name: list[0].name, x: 0.5, y: 0.706, h: 0.334 }] : CAST;  // 单学生正中
+  for (const c of activeSeats){
     const s = meta[c.name] || {};
     const root = document.createElement('div');
     root.className = 'stu';
@@ -327,7 +328,7 @@ function buildCast(list){
       '<div class="bub"></div>' +
       '<div class="tag"><span class="nm kai"></span></div>' +
       '<img class="fig" alt="" />';
-    root.querySelector('.nm').textContent = c.name + (s.trait ? ' · ' + String(s.trait).replace(/型$/, '') : '');
+    root.querySelector('.nm').textContent = '';   // 名字不出现在体验层（匿名学生，差异由提问体现）
     const figEl = root.querySelector('.fig');
     figEl.src = FIG[c.name] || '';
     figEl.style.animationDelay = (-(CAST.indexOf(c) * 1.37)).toFixed(2) + 's';   // 各自错开，免得整齐地一起晃（像机器）
@@ -343,11 +344,9 @@ function buildCast(list){
 //   两版都来自假理论（模型采样自评 / 2-gram 噪声判定），已删除。学生就是镜子，不给他打分。
 function speak(name, on){ const e = els[name]; if (!e) return; e.root.classList.toggle('speaking', !!on); }
 function think(name, on){ const e = els[name]; if (!e) return; e.root.classList.toggle('thinking', !!on); }
-function bubble(name, text, mis){
+function bubble(name, text){
   const e = els[name]; if (!e) return;
-  let html = escapeHtml(text || '（未发言）');
-  if (mis) html += '<span class="mis">他进课堂前以为：' + escapeHtml(mis) + '</span>';
-  e.bub.innerHTML = html;
+  e.bub.innerHTML = escapeHtml(text || '（未发言）');   // 只显示学生说的话；名字/前概念不露体验层
   e.bub.classList.add('show');
   clearTimeout(e._t); e._t = setTimeout(() => e.bub.classList.remove('show'), 7000);
 }
@@ -493,7 +492,7 @@ function fillDrawer(ev){
     + '纪要走笔：' + (m.by || '—') + '<br>'
     + '学生发言来源：' + src + '<br>'
     + 'AI 学生状态：' + (llmInfo ? modeDetail(llmInfo) : '未知') + '<br>'
-    + '纪要落盘：' + (m.path ? m.path : (m.error ? ('落盘异常：' + m.error) : '—'));
+    + '纪要落盘：' + (m.path ? escapeHtml(m.path) : (m.error ? ('落盘异常：' + escapeHtml(m.error)) : '—'));
   $('dNote').textContent = '「答到没」由你课后逐条对着清单自己判——机器只数你回了几枚、欠几枚，不替你下结论。'
     + '这一页的数据是给想深挖的人看的，课堂上不出现。';
 }
@@ -505,11 +504,25 @@ function renderReflect(ev) {
   const box = $('wkReflect');
   const R0 = window.LJReflection;
   if (!box) return;
+  // 跨课轨迹（供生成式总结脚手架"真会动"；只读 localStorage、不删不改）
+  let trajForReflect = null;
+  try {
+    const all = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.indexOf('lingjing_zhaojing_') === 0) {
+        try { all.push(JSON.parse(localStorage.getItem(k))); } catch (e) {}
+      }
+    }
+    if (all.length > 1 && R0 && R0.accumulateTrajectory) {
+      trajForReflect = all.reduce((t, fd) => R0.accumulateTrajectory(t, fd), null);
+    }
+  } catch (e) {}
   if (!md || !md.students || !md.students.length) { box.innerHTML = ''; return; }
   lastMirrorDraft = md; lastLessonTitle = ev.lessonTitle || '';
   const L = [];
   L.push('<h3 class="kai">双稿·镜鉴（AI 初稿 · 草稿·待你修订）</h3>');
-  L.push('<p class="fine">下面是你五个学生当镜子写下的「我听到的 / 我没跟上的 / 我可能理解偏了的」。全用「我」说，不评价不评分——你改完的才是真总结。</p>');
+  L.push('<p class="fine">下面是你的镜子（学生）写下的「我听到的 / 我没跟上的 / 我可能理解偏了的」。全用「我」说，不评价不评分——你改完的才是真总结。</p>');
   for (const s of md.students) {
     L.push('<div class="draft"><span class="tag">草稿·待修订</span> <b>' + escapeHtml(s.name) + '</b>');
     for (const key of ['heard', 'confused', 'misread']) {
@@ -546,12 +559,67 @@ function renderReflect(ev) {
       L.push('<div class="fine"><b>元认知自检：</b></div>');
       for (const a of metacog) L.push('<div class="fine">· ' + escapeHtml(a.title) + '：' + escapeHtml(a.question) + '</div>');
     }
+    const sc = (R0 && R0.buildSelfCritiquePrompts) ? R0.buildSelfCritiquePrompts() : [];
+    if (sc.length) {
+      L.push('<div class="fine"><b>自我批评（坚持 / 修正）：</b></div>');
+      for (const a of sc) L.push('<div class="fine">· ' + escapeHtml(a.title) + '：' + escapeHtml(a.question) + '</div>');
+    }
+    const tp = (R0 && R0.buildTrialPrompts) ? R0.buildTrialPrompts() : [];
+    if (tp.length) {
+      L.push('<div class="fine"><b>渐进试错（先试再定论）：</b></div>');
+      for (const a of tp) L.push('<div class="fine">· ' + escapeHtml(a.title) + '：' + escapeHtml(a.question) + '</div>');
+    }
+    const op = (R0 && R0.buildOutcomePrompts) ? R0.buildOutcomePrompts() : [];
+    if (op.length) {
+      L.push('<div class="fine"><b>效果导向（不拘形式）：</b></div>');
+      for (const a of op) L.push('<div class="fine">· ' + escapeHtml(a.title) + '：' + escapeHtml(a.question) + '</div>');
+    }
+    // 生成式总结（写给自己；挑重点→组织成一段→连已有→能迁移；依跨课轨迹具体化）
+    const sp = (R0 && R0.buildSummaryPrompts) ? R0.buildSummaryPrompts(trajForReflect) : [];
+    if (sp.length) {
+      L.push('<div class="fine"><b>生成式总结（写给自己，别照抄原句）：</b></div>');
+      for (const a of sp) L.push('<div class="fine">· ' + escapeHtml(a.title) + '：' + escapeHtml(a.question) + '</div>');
+    }
+    // 生成式总结·辅助计算（确定性本地启发式：给候选/链接/度量，判定权在人；随输入实时更新）
+    L.push('<div class="fine" id="rfAssist"></div>');
+    // 复习调度（该回看了）：依据跨课轨迹 + SM-2 间隔，到期的保留困惑提示回看（纯调度，不判掌握度）
+    const rp = (R0 && R0.buildReviewSchedulePrompts) ? R0.buildReviewSchedulePrompts(trajForReflect, Date.now()) : [];
+    if (rp.length) {
+      L.push('<div class="fine"><b>复习调度（该回看了）：</b></div>');
+      for (const a of rp) L.push('<div class="fine">· ' + escapeHtml(a.title) + '：' + escapeHtml(a.question) + '</div>');
+    }
     L.push('</details>');
   }
   L.push('<button class="final" id="rfFinal">定稿（存为人类终审版）</button>');
   L.push('<div class="out" id="rfOut" style="display:none"></div>');
   box.innerHTML = L.join('');
   const btn = $('rfFinal'); if (btn) btn.onclick = onReflectFinal;
+  // 辅助计算：随人书写实时更新（不替人定稿，只给候选/链接/度量）
+  ['rfFact', 'rfReflect', 'rfAction', 'rfReserve'].forEach((id) => {
+    const t = $(id);
+    if (t) t.addEventListener('input', () => renderAssist(R0, trajForReflect));
+  });
+  renderAssist(R0, trajForReflect);
+}
+// 生成式总结·辅助计算渲染：吃跨课轨迹 + 当前书写文本，给确定性候选/链接/度量
+function renderAssist(R0, traj) {
+  const el = $('rfAssist');
+  if (!el || !R0 || !R0.buildSummaryAssist) return;
+  const cur = [($('rfFact') || {}).value, ($('rfReflect') || {}).value,
+    ($('rfAction') || {}).value, ($('rfReserve') || {}).value].join('\n').trim();
+  const a = R0.buildSummaryAssist(traj, cur);
+  const parts = [];
+  if (a.select.length) {
+    parts.push('<b>辅助·挑重点（建议，你定）：</b> ' + a.select.map((s) => escapeHtml(s.text) + '〈' + s.salience + '〉').join('；'));
+  }
+  if (a.integrate.length) {
+    parts.push('<b>辅助·连已有：</b> ' + a.integrate.map((x) => escapeHtml(x.text) + '（' + x.similarity + '）').join('；'));
+  }
+  if (a.extend) {
+    parts.push('<b>辅助·可迁移到：</b> ' + escapeHtml(a.extend.text));
+  }
+  if (parts.length) parts.push('<span class="muted">（以上为确定性辅助建议，判定权在你）</span>');
+  el.innerHTML = parts.map((p) => '<div class="fine">· ' + p + '</div>').join('');
 }
 function onReflectFinal() {
   const R = window.LJReflection;
@@ -581,6 +649,8 @@ function onReflectFinal() {
         if (traj && traj.entries.length > 1) {
           pre = '（跨 ' + traj.entries.length + ' 课，你已积累 ' + traj.blindSpotCount
             + ' 条保留困惑未删——下次课前回看它们。）\n\n';
+          const mc = (R.buildMainContradictionPrompt) ? R.buildMainContradictionPrompt(traj, finalDraft) : null;
+          if (mc) pre += '（抓主要矛盾：' + mc.text + '）\n\n';
         }
       }
     } catch (e) {}
@@ -591,6 +661,67 @@ function onReflectFinal() {
     localStorage.setItem(key, JSON.stringify(finalDraft));
   } catch (e) {}
   const btn = $('rfFinal'); if (btn) btn.textContent = '已定稿（可继续修改后再次定稿）';
+}
+
+// ---- 路线-cheap 盲区地图：G 概念图 + m 证据区间 + ZPD fading（课后场景，不露内部数字，全 escape）----
+function renderBlindMap(ev) {
+  const g = ev.weakGraph, evd = ev.evidence || [], fading = ev.fading || [];
+  if (!g || !g.nodes || !g.nodes.length) return '';
+  const nodes = g.nodes, edges = g.edges, n = nodes.length;
+  const W = 520, H = 300, cx = W / 2, cy = H / 2 - 8, R = Math.min(W, H) / 2 - 62;
+  const pos = nodes.map((nd, i) => {
+    const ang = (i / n) * Math.PI * 2 - Math.PI / 2;
+    return { x: cx + R * Math.cos(ang), y: cy + R * Math.sin(ang), nd };
+  });
+  const byIdx = {}; pos.forEach((p, i) => { byIdx[nodes[i].idx] = p; });
+  let edgeSvg = '';
+  for (const e of edges) {
+    const a = byIdx[e.a], b = byIdx[e.b];
+    if (!a || !b) continue;
+    edgeSvg += '<line x1="' + a.x.toFixed(1) + '" y1="' + a.y.toFixed(1) + '" x2="' + b.x.toFixed(1)
+      + '" y2="' + b.y.toFixed(1) + '" stroke="#c9a24a" stroke-width="' + (0.8 + e.weight) + '" stroke-opacity="0.5"/>';
+  }
+  let nodeSvg = '';
+  for (const p of pos) {
+    const r = 10 + p.nd.degree * 4;
+    nodeSvg += '<circle cx="' + p.x.toFixed(1) + '" cy="' + p.y.toFixed(1) + '" r="' + r
+      + '" fill="#2a3a52" stroke="#e0b84a" stroke-width="1.5"/>'
+      + '<text x="' + p.x.toFixed(1) + '" y="' + (p.y + r + 12).toFixed(1)
+      + '" text-anchor="middle" font-size="11" fill="#333">' + escapeHtml(cut(String(p.nd.concept), 6)) + '</text>';
+  }
+  const graphSvg = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" style="max-width:520px;background:rgba(255,255,255,0.62);border-radius:10px">'
+    + edgeSvg + nodeSvg + '</svg>';
+  let bars = '';
+  for (const e of evd) {
+    if (!e || e.n === 0) continue;
+    const w1 = Math.round(e.belief * 100), w2 = Math.round(e.plausibility * 100) - w1;
+    const wide = (e.plausibility - e.belief) >= 0.5;
+    bars += '<div style="display:flex;align-items:center;gap:8px;margin:5px 0">'
+      + '<span style="width:86px;font-size:12px;color:#333;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHtml(e.concept) + '</span>'
+      + '<span style="flex:1;height:10px;background:#eee;border-radius:6px;overflow:hidden;display:flex">'
+      + '<span style="width:' + w1 + '%;background:#2a7a55;display:block"></span>'
+      + '<span style="width:' + w2 + '%;background:repeating-linear-gradient(45deg,#cfcfcf,#cfcfcf 3px,#e2e2e2 3px,#e2e2e2 6px);display:block"></span></span>'
+      + (wide ? '<span style="font-size:11px;color:#b8860b">机器还拿不准</span>' : '') + '</div>';
+  }
+  let fadeSvg = '';
+  if (fading.length) {
+    const fw = 520, fh = 120, pad = 30, maxSc = Math.max(6, ...fading.map((f) => f.scaffold));
+    const X = (i) => pad + (fw - 2 * pad) * (fading.length === 1 ? 0.5 : i / (fading.length - 1));
+    const Y = (s) => fh - pad - (fh - 2 * pad) * (s / maxSc);
+    fadeSvg = '<svg viewBox="0 0 ' + fw + ' ' + fh + '" width="100%" style="max-width:520px;background:rgba(255,255,255,0.62);border-radius:10px">'
+      + '<polyline points="' + fading.map((f, i) => X(i).toFixed(1) + ',' + Y(f.scaffold).toFixed(1)).join(' ') + '" fill="none" stroke="#3a8f7a" stroke-width="2"/>'
+      + fading.map((f, i) => '<circle cx="' + X(i).toFixed(1) + '" cy="' + Y(f.scaffold).toFixed(1) + '" r="3" fill="#3a8f7a"/>'
+        + '<text x="' + X(i).toFixed(1) + '" y="' + (fh - 8) + '" text-anchor="middle" font-size="10" fill="#666">第' + f.round + '轮</text>').join('')
+      + '</svg>';
+  }
+  let html = '<div class="bmap" style="margin-top:10px">'
+    + '<h4 class="kai">你的盲区地图（概念怎么连 · 机器拿不拿得准）</h4>'
+    + '<p class="fine">图里点越大＝被学生逼得越狠（你的主要矛盾）；点之间的连线＝这些口子是一根链条上的。下面条越长＝机器越没把握，值得你多讲一遍。</p>'
+    + graphSvg;
+  if (bars) html += '<div style="margin-top:8px">' + bars + '</div>';
+  if (fadeSvg) html += '<p class="fine" style="margin-top:8px">脚手架逐轮渐退曲线：线往上升＝学生被逼更难的口子还接得住，说明在独立。</p>' + fadeSvg;
+  html += '</div>';
+  return html;
 }
 
 function renderWork(ev){
@@ -623,6 +754,9 @@ function renderWork(ev){
   $('wkBlind').innerHTML = openN
     ? '<b>还有 ' + openN + ' 枚探测你没回 —— 这份纪要里最值钱的就是这几条：它们标出了你这次没说到的地方（逐条见下方「他问的 / 你答的」）。</b>'
     : '这一课没有悬着没回的探测。但这不等于他们全懂了，只说明你这次把话正好说到他们的疑问上了。';
+  // 路线-cheap：盲区地图（G 概念图 + m 证据区间 + ZPD fading），课后场景，全 escape，不露内部指标数字
+  const mapHtml = renderBlindMap(ev);
+  if (mapHtml) $('wkBlind').innerHTML += mapHtml;
 
   // —— 教中学：教师的"我的收获"报告（人话，四节：讲清了/盲区/术语带过/费曼下一步）——
   // 这是需求⑥的核心交付物——让使用者从讲授中获得"属于自己的东西"。只进课后面板，不进体验层。
@@ -691,7 +825,7 @@ function handleEvent(ev){
       for (const c of CAST){
         const e = els[c.name]; if (!e) continue;
         e.mis = (meta[c.name] && meta[c.name].mis) || '';
-        e.root.querySelector('.nm').textContent = c.name + ((meta[c.name] && meta[c.name].trait) ? ' · ' + String(meta[c.name].trait).replace(/型$/, '') : '');
+        e.root.querySelector('.nm').textContent = '';   // 名字不出现在体验层（匿名学生，差异由提问体现）
       }
     }
     transcript.length = 0; lastWork = null;
@@ -714,7 +848,7 @@ function handleEvent(ev){
     think(ev.name, false);
     const e = els[ev.name];
     speak(ev.name, true); setTimeout(() => speak(ev.name, false), 1600);
-    bubble(ev.name, ev.text, (e && e.mis) || '');
+    bubble(ev.name, ev.text);   // 只显示学生说的话；名字/前概念不露体验层
     transcript.push(ev.name + '：' + ev.text);
     return;
   }
@@ -839,7 +973,7 @@ $('dlGain').onclick = () => {
   setTimeout(() => URL.revokeObjectURL(a.href), 3000);
 };
 
-// ===== 打开页面 = 人已经在教室里（先把 5 名学生摆进来，再等老师开口） =====
+// ===== 打开页面 = 人已经在教室里（先把学生摆进来，再等老师开口） =====
 async function boot(){
   setBar('idle');
   setPhase('idle');
@@ -852,7 +986,7 @@ async function boot(){
       : '学生已就座 · 说一句你想教的东西，就上课';
   }catch(e){
     buildCast(FALLBACK_ROSTER);
-    $('status').textContent = '已经摆好 5 名学生 · 说一句你想教的东西，就上课';
+    $('status').textContent = '已经摆好 ' + FALLBACK_ROSTER.length + ' 名学生 · 说一句你想教的东西，就上课';
     $('mode').textContent = '名单读取失败（' + ((e && e.message) || e) + '）';
   }
   layout();

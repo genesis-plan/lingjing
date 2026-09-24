@@ -38,7 +38,6 @@
 //   总结的落点永远是"下一步该干什么"，不是给人打分。
 
 import { initialStability, nextIntervalDays } from './journal.mjs';
-import reflection from './reflection.js';   // 双稿制确定性反思引擎（总结方法论解耦为独立模块）
 
 export function clamp(x, lo, hi) { return Math.max(lo, Math.min(hi, x)); }
 

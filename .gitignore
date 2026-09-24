@@ -45,5 +45,5 @@ sessions/
 # 项目内部工作记忆（本地，不入库；避免每次改动都挂文档到仓库）
 .workbuddy/
 
-# docs/ 为内部设计文档，不入库（仓库只需 README + LICENSE + 源码）
-docs/
+# docs/ 为面向使用者的主题文档，随仓库发布（README 的文档表指向它）
+# 注：内部设计 / 过程文档不入库，只留在本地 .workbuddy/reports/

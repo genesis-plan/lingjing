@@ -20,171 +20,39 @@
 //      允许说"没懂"、说"我走神了"，不再每轮都是模板提问
 //   ⑥无密钥时的兜底语料改为**按性格×概念×掌握度生成**（不再 3 句死循环）
 //
-// 学生大脑走 OpenRouter（默认 google/gemma-4-26b-a4b-it:free，可用 LINGJING_OR_MODEL 覆盖；
-// 免费档限 50 次/天，充值后升至 1000 次/天）。无密钥/超时/429 时走确定性兜底语料。
-// 安全：密钥只从环境变量 LINGJING_OR_KEY 读取，绝不写进本文件或仓库。
+// 学生大脑 = 「这个办法」的「免费对话→输出」环节：走 llm.sfChat('chat')（硅基流动免费对话模型
+// deepseek-ai/DeepSeek-R1-0528-Qwen3-8B；硅基流动无 key/失败自动走 OpenRouter 免费兜底）。
+// 与配图/翻译/推理/语音工具同一条免费链路——整个产品不再劈成两半。
+// 无密钥/超时/限流时走确定性兜底语料。安全：密钥只从环境变量读取，绝不写进本文件或仓库。
 //
 // 运行（CLI）：     LINGJING_OR_KEY=sk-or-... node teacher.js "课题名::你的讲解…"
 // 运行（网页）：   node server.js   →  浏览器开 http://localhost:8080
 
-const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const { World } = require('./world.js');
 const {
   PERSONALITIES, clamp, extractConcepts, estimateDifficulty, valueFunction, teachingRelation,
+  assessLessonConcreteness,
   guessMisconception, teacherPoints, isClarifying, quotable,
   teacherDiagnosis, teacherReport,
   PROBE_TYPES, classifyProbe, probeLabel, probeCounts, probeSummaryLine,
-  detectWeakPoints, weakPointToProbeType,
+  detectWeakPoints, weakPointToProbeType, probeVerdict,
+  roughApprox, evidenceInterval, sequentialConceptVerdict, zpdFading,
 } = require('./teaching.js');
 const {
   buildQuestionSpec, renderWpHint, inferResponseMode,
 } = require('./questioning.js');   // TCMQ 确定性提问引擎（提问方法论解耦为独立模块）
 const reflection = require('./public/reflection.js');   // 双稿制确定性反思引擎（总结方法论解耦为独立模块）
 
-const KEY = process.env.LINGJING_OR_KEY || '';
+const llm = require('./llm.js');   // LLM 传输层已抽离为独立连接器（见 llm.js）
+const { KEY, MODEL, MODEL_CHAIN, oneCall, orChat, sfChat, llmStatus, llmUsable, markDead, LLM_BUDGET_MS } = llm;
+const { buildWeakGraph } = require('./graph.js');   // G 图论盲区网（路线）
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// ---- 模型降级链（2026-09-10 实测重排）----
-// 实测（curl 打真实响应 + 两行格式遵循度）：nemotron-3-super-120b 最快最稳（4s 出中文）；
-// gemma-4-26b/31b 共享池频繁 429，放后面；inclusionai/ling-3.0-flash 可用但偶尔出戏。
-// 顺序按"实测命中率"排，谁先成功谁被记住（goodModel），后续优先复用。
-// ⚠️ 免费额度实测：本 key = 50 次/天（free-models-per-day），1 个学生 1 轮 = 1 次调用，
-//    即一天约 10 轮课。充值 ≥10 credits 后升到 1000 次/天。也可用 LINGJING_OR_MODEL 指定自有模型。
-const DEFAULT_CHAIN = [
-  'nvidia/nemotron-3-super-120b-a12b:free',
-  'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
-  'google/gemma-4-31b-it:free',
-  'google/gemma-4-26b-a4b-it:free',
-  'inclusionai/ling-3.0-flash-sante:free',
-];
-const MODEL_CHAIN = (process.env.LINGJING_OR_MODEL ? [process.env.LINGJING_OR_MODEL] : []).concat(DEFAULT_CHAIN);
-const MODEL = MODEL_CHAIN[0];
-let goodModel = null; // 上一次成功的模型（命中即优先）
-
-// 熔断：账户级额度/鉴权问题（如免费日额度用尽）→ 一段时间内直接走兜底，不再每轮白等模型
-let quotaDeadUntil = 0;
-let deadReason = '';
-function markDead(ms, why) {
-  quotaDeadUntil = Math.max(quotaDeadUntil, Date.now() + ms);
-  if (why) deadReason = why;
-}
-function llmUsable() { return !!KEY && Date.now() >= quotaDeadUntil; }
-// 诚实标注：区分「没配 key」/「额度或限流熔断」/「已配置但本课还没实测过」三种状态。
-// verified 只在真的成功调用过 LLM 之后才为 true——避免页面一打开就宣称"真 LLM 学生在场"然后全部走兜底。
-let llmVerified = false;
-function llmStatus() {
-  const usable = llmUsable();
-  let state = 'ready', reason = deadReason;
-  if (!KEY) { state = 'no-key'; reason = '未配置 LINGJING_OR_KEY'; }
-  else if (!usable) { state = 'circuit-open'; reason = deadReason || '额度/限流熔断中'; }
-  else if (!llmVerified) { state = 'unverified'; reason = '已配置，但本课尚未实测（首次调用前不保证可用）'; }
-  else { state = 'verified'; reason = ''; }
-  return { usable, verified: llmVerified, state, reason, until: quotaDeadUntil, model: goodModel || MODEL };
-}
-
-// 每轮 LLM 时间预算（超出即用兜底语料补齐，保证课堂节奏不卡死）
-const LLM_BUDGET_MS = Number(process.env.LINGJING_LLM_BUDGET_MS) || 45000;
-
-// ---- OpenRouter 调用（node 原生 https，绕过托管运行时 fetch 不发 Authorization 头的坑）----
-// LINGJING_OR_BASE 可覆盖完整端点（默认 OpenRouter）——用于把课堂指向本地假模型，
-// 在**没有额度**的情况下也能端到端验证"每个学生一次调用 + 教师的话真的进了提示词"。
-const httpMod = require('http');
-const OR_TARGET = (() => {
-  const raw = process.env.LINGJING_OR_BASE || 'https://openrouter.ai/api/v1/chat/completions';
-  try {
-    const u = new URL(raw);
-    return {
-      mod: u.protocol === 'http:' ? httpMod : https,
-      hostname: u.hostname,
-      port: u.port ? Number(u.port) : undefined,
-      path: u.pathname + (u.search || ''),
-    };
-  } catch {
-    return { mod: https, hostname: 'openrouter.ai', port: undefined, path: '/api/v1/chat/completions' };
-  }
-})();
-function oneCall(model, system, user, opts = {}, tried = false) {
-  const { timeoutMs = 12000, maxTokens = 140, temperature = 0.85 } = opts;
-  const body = JSON.stringify({
-    model,
-    messages: [
-      { role: 'system', content: system },
-      { role: 'user', content: user },
-    ],
-    max_tokens: maxTokens,
-    temperature,
-  });
-  return new Promise((resolve) => {
-    const req = OR_TARGET.mod.request({
-      hostname: OR_TARGET.hostname,
-      port: OR_TARGET.port,
-      path: OR_TARGET.path,
-      method: 'POST',
-      timeout: timeoutMs,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${KEY}`,
-        'Content-Length': Buffer.byteLength(body),
-      },
-    }, (res) => {
-      let d = '';
-      res.on('data', (c) => (d += c));
-      res.on('end', () => {
-        try {
-          const j = JSON.parse(d);
-          if (j.error) {
-            const meta = j.error.metadata || {};
-            const src = String(meta.limit_source || '');
-            const msg = String(j.error.message || '');
-            // ① 账户级日额度用尽（free-models-per-day）→ 熔断到重置时刻，别再白等
-            //    ⚠️ 2026-09-10 修严重 bug：X-RateLimit-Reset 是**毫秒**时间戳（如 1789084800000），
-            //    旧代码又乘了 1000 → 熔断解除时间落在公元五万年，
-            //    后果＝今天一旦熔断，**明天额度恢复了也永远不会再调模型**，学生永远是固定句子。
-            //    现在：>1e12 视为毫秒，否则视为秒；并封顶 26 小时，任何异常值都不会锁死进程。
-            if (/daily/i.test(src + msg) || /free-models-per-day/.test(msg)) {
-              const rawReset = Number((meta.headers || {})['X-RateLimit-Reset']);
-              const resetMs = !rawReset ? 0 : (rawReset > 1e12 ? rawReset : rawReset * 1000);
-              const until = resetMs
-                ? Math.min(Math.max(60000, resetMs - Date.now()), 26 * 3600 * 1000)
-                : 3600000;
-              markDead(until, '免费模型日额度已用尽');
-              resolve(''); return;
-            }
-            // ② 鉴权失败 → 熔断 10 分钟
-            if (j.error.code === 401) { markDead(600000, '密钥无效'); resolve(''); return; }
-            // ③ 上游 429/403（共享池忙）→ 同模型再试一次，仍失败则交给降级链换模型
-            if (!tried && (j.error.code === 429 || j.error.code === 403)) {
-              setTimeout(() => oneCall(model, system, user, opts, true).then(resolve), 900);
-              return;
-            }
-            resolve(''); return;
-          }
-          resolve((j.choices?.[0]?.message?.content || '').trim());
-        } catch { resolve(''); }
-      });
-    });
-    req.on('timeout', () => { req.destroy(); resolve(''); });
-    req.on('error', () => resolve(''));
-    req.write(body);
-    req.end();
-  });
-}
-
-// 依次尝试模型链，返回第一个非空回答；记住成功的模型
-async function orChat(system, user, opts = {}) {
-  if (!llmUsable()) return '';
-  const deadline = opts.deadline || 0;
-  const order = goodModel ? [goodModel].concat(MODEL_CHAIN.filter((m) => m !== goodModel)) : MODEL_CHAIN;
-  for (const m of order) {
-    if (deadline && Date.now() > deadline) return '';   // 超预算 → 立即走兜底，不拖慢课堂
-    const txt = await oneCall(m, system, user, opts);
-    if (txt) { goodModel = m; llmVerified = true; return txt; }
-    if (!llmUsable()) return '';                        // 已熔断
-  }
-  return '';
-}
+// （LLM 传输层已抽离至独立模块 llm.js：模型降级链 / 额度熔断 / 端点覆盖 / oneCall / orChat。
+//   本文件只通过上方 `const llm = require('./llm.js')` 取用，密钥仅读环境变量。）
+// （oneCall / orChat 已随 LLM 传输层一并迁至 llm.js；本文件通过 `orChat` 别名直接调用。）
 
 // 清洗学生发言：去思考过程/安全标签/代码围栏/引号；只挡**整句英文泄漏**，放行 CO₂、0.5 这类夹带
 function cleanSay(s) {
@@ -194,7 +62,12 @@ function cleanSay(s) {
   const ascii = (line.match(/[A-Za-z]/g) || []).length;
   if (ascii > 0 && ascii / Math.max(1, line.length) > 0.3) return ''; // 大半是英文 → 判定泄漏
   // 剥开头泄漏的元指令标签（craft: / answer: / 类型： / 第2行： 等模型把内部提示词带进了嘴）
-  line = line.replace(/^[A-Za-z\u4e00-\u9fa5]{1,14}[:：]\s*/i, '')
+  // ⚠️ 2026-09-16 修：前缀上限从 {1,14} 收到 {1,6}。
+  //   旧值会连"先生您说地球自转是关键："这种含冒号的引述从句也一口吞掉（最多 14 个汉字），
+  //   导致第二轮学生把老师刚说的关键句（含冒号）整个丢掉、只留冒号后的碎片段——
+  //   镜子没照全，且让"人类输入真的进了学生嘴"这条接线测试在第二轮误报红。
+  //   真实说话人标签都是 ≤6 字（小明：/学生：/先生：/我想问：），收到 6 字足够且不伤引述。
+  line = line.replace(/^[A-Za-z\u4e00-\u9fa5]{1,6}[:：]\s*/i, '')
             .replace(/^第\s*\d+\s*行\s*[:：]\s*/i, '')
             .replace(/^(类型|标签|探测类型|type|answer|response|reply|output|note)\s*[:：]\s*/i, '');
   line = line.replace(/[*`#>「」"]/g, '').replace(/^[^：:]{1,6}[：:]\s*/, '').trim();
@@ -257,6 +130,8 @@ const PROBE_ROLES = {
   distinct:  (c) => `针对「${c}」，问先生：它和另一个说法到底差在哪？你总把这两个搞混。`,
   mechanism: (c) => `针对「${c}」，问先生：为什么会这样？中间到底发生了什么？`,
   apply:     (c) => `针对「${c}」，问先生：要是把条件换成别的，结果还会是这样吗？`,
+  // 薄教案专用：把先生原话**原样举起来**逼落地，而不是装作有概念可探
+  land:     (c) => `把你听到的先生那句话「${c}」**原样举起来**，质疑它太虚：问"这到底什么意思""思维/概念指什么""能不能拿一件具体的事说明白""它跟别的说法差在哪"。逼先生把口号落地成能懂的东西。`,
 };
 // 轮次顺序：先把最"扎人"的三类放前面（反例／边界／正例），再补区分／机制／应用
 const PROBE_ORDER = ['counter', 'bound', 'example', 'distinct', 'mechanism', 'apply'];
@@ -334,7 +209,37 @@ const PROBE_FRAME = {
     (c) => `换成另外一种情况，「${c}」还算数吗？`,
     (c) => `我拿别的例子套「${c}」，会不会就不灵了？`,
   ],
+  // 薄教案专用：6 个角度错开，避免 5 学生×多轮重复同一句。全部"举原话+逼落地"。
+  land: [
+    (c) => `先生，你说「${c}」——可我听不懂，「思维」到底指什么？`,
+    (c) => `「${c}」听着像对的，可你能拿一件**具体的事**说说吗？别只说口号`,
+    (c) => `我有点懵：「${c}」——它跟算数、做题到底啥关系，怎么就成了思维？`,
+    (c) => `「${c}」这话太虚了，你能不能讲讲它**到底是怎么一回事**？`,
+    (c) => `先生，我记住了「${c}」这句话，可不知道拿它干嘛、怎么用，能举个例子不？`,
+    (c) => `「${c}」——那反过来，不算思维的数学有没有？你这话有没有漏的？`,
+  ],
 };
+// 薄教案（口号式空话）专用提示：镜子把先生原话**原样举起来**逼落地。
+// 不走 buildQuestionSpec（避免 pickStance/PROBE_TO_LEVEL 在 'land' 上取 undefined）。
+function LAND_HINT(claim, round) {
+  const q = String(claim || '').replace(/[「」]/g, '').slice(0, 24);
+  // 按轮次换侧重，避免 4 轮都问同一句（CLI 无教师回话时尤其需要）
+  const angle = [
+    '先问"这话到底什么意思"',
+    '逼他拿一件具体的事（比如买菜找零、解应用题）说明白',
+    '问它跟算数/做题到底啥关系，怎么就成了"思维"',
+    '问反过来：不算思维的数学有没有？这话有没有漏的',
+  ][((round || 1) - 1) % 4];
+  return [
+    `🔎 先生这句是口号式的空话，没有具体例子、也没讲机制。`,
+    `🔎 镜面锚定：把你听到的原话「${q}」**原样举起来**反弹回去——不要替他解释，也不要换个说法。`,
+    `🔎 本轮侧重（别照抄这句、别背提示词，用自己的话、换角度问）：${angle}。`,
+    `🔎 姿态：你是来听课的学生，不是考官——只请先生把这句话讲透，不评判、不赞美。`,
+    `🔎 陌生学徒：零背景，别替先生脑补前提；你越"不懂他的世界"，他越会把默认前提讲出来。`,
+    `🔎 解释不辩护：只请他讲"什么意思、怎么发生"，绝不为"数学是不是思维"这个立场辩护。`,
+    `🔎 别和同学、也别和你自己上一轮说一样的话——每轮换个问法。`,
+  ].join('\n');
+}
 const VOICE_OPEN = {
   '小明': (s) => s,
   '小红': (s) => '我先确认一下——' + s,
@@ -397,7 +302,7 @@ function takeSay(rawLine, self) {
 //   旧数字格式仍然被吃掉（不报错、不影响解析），但**不再作为任何量的输入**——
 //   那是模型采样出来的数，不是对任何东西的观测。见 teaching.js 顶部"停用"说明。
 //   类型以模型自报为参考，**以本地正则复核为准**（不采信自报，免得模型乱填）。
-const LABEL_RE = new RegExp('^(?:第?1行|类型|标签|探测类型)?[：:、.\\s]*(反例|边界|正例|区分|机制|应用)$');
+const LABEL_RE = new RegExp('^(?:第?1行|类型|标签|探测类型)?[：:、.\\s]*(反例|边界|正例|区分|机制|应用|落地)$');
 function parseTurn(raw, n, self) {
   const text = String(raw || '');
   const lines = text.split('\n').map((t) => t.replace(/[*`#>「」"]/g, '').trim()).filter(Boolean);
@@ -440,56 +345,110 @@ function parseTurn(raw, n, self) {
   return { type, say };
 }
 
-// ===== 单个学生的一轮：一次调用 → 一枚探测（类型 + 发言）（含人设、记忆、探测任务）=====
-//
-// 2026-09-11 重做（用户："重新考虑他们的回答……对学生使用者有用……不要固定是那几句"）。
-// 与旧版的三个实质差别：
-//   ① 第1行从"给我自己打 N 个理解分"改成"本轮探测类型"——**输入源换了**，不再是模型采样数字。
-//   ② 探测任务（盯哪个要点、抛哪一类）由 (学生序号 + 轮次) 指定，所以**输入变了问的就一定变**；
-//      旧版是 5 条固定角色轮转，模型很容易滑回那几句。
-//   ③ 明确"你来上课不是来打分、不是来配合点头"，而是**逼先生把话说清楚**——
-//      依据 VanLehn (2003)：学习只在学生到达 impasse 之后发生，学生不制造卡点，讲得再好也没用。
-async function studentTurn(st, ctx) {
-  const { i, round, lessonText, lessonTitle, concepts,
-          teacherReply, peerLines, target, kind, deadline, wpHint } = ctx;
+// ===== 镜子的「照—问」两步法（全免费，把组合办法真正落到镜子上）=====
+// 照（推理 Xing4.0-29B 免费）：从先生的话 + 这枚学生的前概念，找出最该被追问的那一个具体缺口（内部，不展示）。
+// 问（对话 Qwen3-8B 免费）：把缺口说成学生口吻的一句追问（非推理模型，不冒思维链、不照抄提示）。
+// 任一段失败 → 退回旧的"单次 chat"用法（已实测可用），镜子绝不哑。
+// 设计依据：一个推理模型既要找缝又要开口容易滑回提示句；两模型各司其职 → 缝更准、话更自然人话。
+async function mirrorAsk(st, ctx) {
+  const { i, round, lessonText, lessonTitle, concepts, teacherReply, target, kind, deadline, wpHint } = ctx;
   const pt = PROBE_TYPES.find((p) => p.key === kind) || PROBE_TYPES[1];
-  const sys =
-    `你是民国学堂里的学生「${st.name}」，${st.trait}。你不是助手，你就是这个学生本人。\n` +
-    `你的说话方式：${st.voice}。你容易卡在：${st.weakness}。你爱说「${st.catch}」。称老师为"先生"。\n` +
-    `你进课堂之前，脑子里已经有一个（可能是错的）想法：「${st.mis}」。\n` +
-    `⚠️ 你来上课**不是来给自己打分，也不是来配合点头**。你的用处只有一件：逼先生把话说清楚。\n` +
-    `你这一轮要抛出的是一枚"探测"——一个具体、能回答、而且答不好就说明先生没讲透的问题。\n` +
-    // 句式脚手架：King (2002) Guided Reciprocal Peer Questioning —— 通用句式比"随便问"产出质量高得多
-    `🔎 提问只能用这六种句式之一（互惠同伴提问）：\n` +
-    `   举个例子：……那件事算不算？／ 什么情况下它就不成立了？／ 有没有反过来也成立的？／\n` +
-    `   这两个说法到底差在哪？／ 为什么会这样、中间发生了什么？／ 要是换成别的，会怎样？\n` +
-    // 必须"具体"：Watson & Mason 的边界例要求造出具体例子，而不是停在抽象层面
-    `⚠️ **必须先亮出你自己的旧想法，再说它跟先生讲的哪里对不上。**\n` +
-    `⚠️ 必须具体：拿生活里一件真事、一个数字、一个反着来的情况当材料；不许讲空道理，\n` +
-    `   更不许问"能再讲一遍吗""我还是不明白"这种没内容的话。\n` +
-    `请严格按两行回答，不要任何别的字：\n` +
-    `第1行：本轮探测类型，只能填「反例」「边界」「正例」「区分」「机制」「应用」中的一个\n` +
-    `第2行：你要说的一句话（不超过40字，大白话）`;
-  const usr =
-    `先生在讲：《${lessonTitle}》\n内容：${lessonText}\n` +
-    `本轮你盯住的要点：「${target}」\n` +
-    `本轮你要抛的探测类型：${pt.label}（${pt.hint}）\n` +
-    `先生刚才说：${teacherReply ? teacherReply : '（第一轮，先生刚讲完课）'}\n` +
-    `同学刚才说：${peerLines.length ? peerLines.join('；') : '（还没人发言）'}\n` +
-    `你上轮说过：${st.last || '（还没发过言）'}\n` +
-    `你进课堂前的旧想法：${st.mis}\n` +
-    `这轮你要做的事：${ctx.role}\n` +
-    (wpHint ? `🔎 ${wpHint}\n` : '') +
-    `可以拿你的旧想法对照，可以和同学争；别说客套话；别重复自己说过的。两行。`;
 
-  const raw = await orChat(sys, usr, { maxTokens: 220, temperature: 0.85 + (i % 5) * 0.03, deadline });
-  const t = parseTurn(raw, concepts.length, st.name);
-  const kind2 = t.type || kind;
-  const say = t.say || fallbackSay(st, target, kind2, round, st.memory.map((m) => m.text), { teacherReply, i });
-  return { say, type: kind2, usedLLM: !!t.say, ci: ctx.targetIdx };   // ci = 盯住的是第几个要点
+  // —— 照：推理模型找缝（内部，绝不展示给用户）——
+  let gap = '';
+  try {
+    const g = await sfChat('reason',
+      '你是课堂里的"镜子"。先生刚讲了一句话，你要找出这句话里最值得被追问的一个具体缺口——是空话没例子？概念混淆？机制没讲？还是反例没考虑？只输出这一枚缺口（不超过28字，不要解释、不要编号）。',
+      `先生原话：「${lessonText}」\n` + (teacherReply ? `本轮补充：「${teacherReply}」\n` : '') +
+      `这枚学生进课堂前以为：「${st.mis}」\n本轮要钉的要点：「${target}」\n探测类型：${pt.label}`,
+      { maxTokens: 64, temperature: 0.35, deadline });
+    gap = (cleanSay(g) || '').split('\n').map((s) => s.trim()).filter(Boolean).pop() || '';
+  } catch { gap = ''; }
+  if (!gap) gap = (wpHint ? ('（' + pt.label + '）') : '') + target;
+
+  // —— 问：对话模型开口（学生口吻，≤40字，非推理不冒思维链）——
+  let say = '';
+  try {
+    const s = await sfChat('say',
+      `你是民国学堂里的学生「${st.name}」，${st.trait}。你不是助手，你就是这个学生本人。\n` +
+      `你的说话方式：${st.voice}。你容易卡在：${st.weakness}。你爱说「${st.catch}」。称老师为"先生"。\n` +
+      `你进课堂前就有一个（可能是错的）想法：「${st.mis}」。\n` +
+      `⚠️ 你来上课不是来打分、不是来点头，只做一件事：逼先生把话说清楚。\n` +
+      `⚠️ 必须先亮出你自己的旧想法，再说它跟先生讲的哪里对不上。\n` +
+      `⚠️ 必须具体：拿生活里一件真事、一个数字当材料；不许讲空道理，不许问"能再讲一遍吗"。\n` +
+      `只回一句话（不超过40字，大白话），把下面这个缺口用你自己的困惑反弹回去——不许替先生解释、不许改写他的意思。`,
+      `先生在讲：《${lessonTitle}》\n内容：${lessonText}\n这枚缺口：${gap}\n你的旧想法：${st.mis}\n这轮姿态：${ctx.role}`,
+      { maxTokens: 120, temperature: 0.9 + (i % 3) * 0.03, deadline });
+    say = (cleanSay(s) || '').split('\n').map((x) => x.trim()).filter(Boolean).pop() || '';
+    if (say.length > 48) say = say.slice(0, 48);
+  } catch { say = ''; }
+
+  // —— 兜底：退回旧的"单次 chat"用法（已实测可用），不让镜子变哑 ——
+  if (!say || !/[一-龥]/.test(say)) {
+    const fbSys =
+      `你是民国学堂里的学生「${st.name}」，${st.trait}。你不是助手，你就是这个学生本人。\n` +
+      `你的说话方式：${st.voice}。你容易卡在：${st.weakness}。你爱说「${st.catch}」。称老师为"先生"。\n` +
+      `你进课堂之前，脑子里已经有一个（可能是错的）想法：「${st.mis}」。\n` +
+      `⚠️ 你来上课**不是来给自己打分，也不是来配合点头**。你的用处只有一件：逼先生把话说清楚。\n` +
+      `你这一轮要抛出的是一枚"探测"——一个具体、能回答、而且答不好就说明先生没讲透的问题。\n` +
+      `🔎 提问只能用这七种句式之一（互惠同伴提问）：\n` +
+      `   举个例子：……那件事算不算？／ 什么情况下它就不成立了？／ 有没有反过来也成立的？／\n` +
+      `   这两个说法到底差在哪？／ 为什么会这样、中间发生了什么？／ 要是换成别的，会怎样？／\n` +
+      `   落地：把先生刚说那句**原话举起来**问——"这话到底什么意思？拿件具体的事说明白"（专治口号式空话）\n` +
+      `⚠️ **必须先亮出你自己的旧想法，再说它跟先生讲的哪里对不上。**\n` +
+      `⚠️ 必须具体：拿生活里一件真事、一个数字、一个反着来的情况当材料；不许讲空道理，\n` +
+      `   更不许问"能再讲一遍吗""我还是不明白"这种没内容的话。\n` +
+      `请严格按两行回答，不要任何别的字：\n` +
+      `第1行：本轮探测类型，只能填「反例」「边界」「正例」「区分」「机制」「应用」「落地」中的一个\n` +
+      `第2行：你要说的一句话（不超过40字，大白话）`;
+    const fbUsr =
+      `先生在讲：《${lessonTitle}》\n内容：${lessonText}\n` +
+      `本轮你盯住的要点：「${target}」\n` +
+      `本轮你要抛的探测类型：${pt.label}（${pt.hint}）\n` +
+      `先生刚才说：${teacherReply ? teacherReply : '（第一轮，先生刚讲完课）'}\n` +
+      `你上轮说过：${st.last || '（还没发过言）'}\n` +
+      `你进课堂前的旧想法：${st.mis}\n` +
+      `这轮你要做的事：${ctx.role}\n` +
+      (wpHint ? `🔎 ${wpHint}\n` : '') +
+      `别说客套话；别重复自己说过的。两行。`;
+    const fb = await sfChat('chat', fbSys, fbUsr, { maxTokens: 220, temperature: 0.85 + (i % 5) * 0.03, deadline });
+    const t = parseTurn(fb, concepts.length, st.name);
+    say = t.say || '';
+  }
+  return say;
+}
+
+// ===== 单个学生的一轮：一枚探测（类型 + 发言）=====
+// 委托给 mirrorAsk（照—问两步法）；类型由确定性引擎指定（不靠模型自报）。
+// 依据认知研究：学习只在学生到达 impasse（卡住）之后发生，学生不制造卡点，讲得再好也没用。
+async function studentTurn(st, ctx) {
+  const { kind, target, round, concepts, teacherReply, i } = ctx;
+  const say = await mirrorAsk(st, ctx);
+  // 分配 'land'（薄教案）时强制保留，不让本地正则把"落地挑战"误判成普通六类之一
+  const kind2 = kind === 'land' ? 'land' : kind;
+  const finalSay = say || fallbackSay(st, target, kind2, round, st.memory.map((m) => m.text), { teacherReply, i });
+  return { say: finalSay, type: kind2, usedLLM: !!say, ci: ctx.targetIdx };   // ci = 盯住的是第几个要点
 }
 
 // ===== 课堂会话（支持"老师回话 → 学生再反应"的闭环）=====
+// 沉默设计：每轮只让 1–2 名学生开口，其余静坐（不抢答、给传授者认知留白）。
+// 第一轮两人暖场，其后每轮一人，轮转覆盖全部学生；绝不一口气 5 人齐发。
+function shuffleIndices(n) {
+  const a = [...Array(n).keys()];
+  for (let i = n - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
+function speakersForRound(round, order, maxRounds) {
+  const n = order.length;
+  if (n === 0) return [];
+  if (n === 1) return [0];   // 只有一面镜子：每轮都开口（无沉默轮换可言，沉默设计在多生时才有意义）
+  const size = (round === 1) ? 2 : 1;                 // 第一轮两人暖场，其后每轮一人
+  const start = (round === 1) ? 0 : round;            // r1→[0,1], r2→[2], r3→[3], r4→[4]，五人各开口一次
+  const out = [];
+  for (let j = 0; j < size && start + j < n; j++) out.push(order[start + j]);
+  return out;
+}
+
 function createSession(lesson, { maxRounds = 4, world } = {}) {
   const w = world || new World();
   const teacher = { id: w.addAgent({ kind: 'agent', name: '你（教师）', profession: 'teacher' }), name: '你（教师）' };
@@ -497,6 +456,7 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
   const lessonTitle = lesson.title;
   const lessonText = lesson.content;
   const concepts = extractConcepts(lessonText, lesson.concepts);   // 定义1（须先于学生创建：前概念要挂到概念上）
+  const lessonThin = assessLessonConcreteness(lessonText).thin;     // 薄教案（口号式空话）→ 走"落地挑战"分支
   const difficulties = concepts.map(estimateDifficulty);
 
   // P0-1 确定性薄弱点定位：对整段讲解做一次性检测（人类文本里的弱信号），作为探针调度的目标库。
@@ -506,16 +466,21 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
   const weakConsumed = new Set();
   let weakHits = 0;
 
-  const students = PERSONALITIES.map((p, i) => ({
+  // ⚠️ 2026-09-18：产品定为「一面镜子」——只保留第一枚学生人设（小明·好奇型）作为唯一的提问者。
+  //   减员是产品决策（人类要的是一面能照出缝的镜子，不是一群分角色的学生），不是算法限制。
+  const students = PERSONALITIES.slice(0, 1).map((p, i) => ({
     id: w.addAgent({ kind: 'agent', name: p.name, profession: 'student' }),
     ...p, last: '', memory: [],
     // 前概念（误解）+ 本轮抛出的探测类型。
     // ⚠️ 不再有"知识状态 p"，也不再有"上一轮探测被接住的程度 addressed"——
     //   我们不可能知道一个 AI 学生"学会了多少"或"被接住了多少"（它没有脑子），
     //   2-gram 判定那个近似也被证明是噪声。学生只负责抛探测，判定权归人类。
-    mis: guessMisconception(i, concepts), myQ: '', probeType: null,
+    mis: guessMisconception(i, concepts, lessonThin), myQ: '', probeType: null,
   }));
   teachingRelation(w, teacher.id, students.map((s) => s.id)); // R_教学
+
+  // 发言轮转顺序（每堂课随机洗牌一次，保证覆盖且每堂不同）：沉默设计见 speakersForRound
+  const speakerOrder = shuffleIndices(students.length);
 
   const asked = [];          // 全程已发言（跨轮去重参考）
   const memory = [];         // 课堂对话记忆：[{round, speaker, text}]
@@ -547,11 +512,11 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
 
     const peerLines = memory.filter((m) => m.speaker !== '老师').slice(-4).map((m) => `${m.speaker}：${m.text}`);
 
-    // 5 个学生分批调用（每人一次调用同时产出 理解自评+发言）。
-    // 2026-09-10 实测：5 个请求同时打免费池会互相挤掉（429），改为每批 2 人、批间 400ms，命中率明显更高。
+    // 学生分批调用（每人一次调用同时产出 理解自评+发言）。
+    // 2026-09-10 实测：多请求同时打免费池会互相挤掉（429），改为每批 2 人、批间 400ms，命中率明显更高。
     // 若 key 已充值（1000 次/天、限流宽松），可设 LINGJING_CONC=5 恢复全并发提速。
+    const speakers = speakersForRound(round, speakerOrder, maxRounds);  // 沉默：本轮只这几位开口
     const turns = new Array(students.length);
-    const BATCH = Math.max(1, Math.min(5, Number(process.env.LINGJING_CONC) || 2));
     const deadline = Date.now() + LLM_BUDGET_MS;   // 本轮 LLM 时间预算（超出用兜底补齐）
 
     // P0-1：老师这轮回话里的文本，同样可能露出"甩术语 / 跳步"——补检进薄弱点池，让后续探测钉准。
@@ -559,44 +524,47 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
       for (const w of detectWeakPoints(teacherReply, concepts)) weakPool.push(w);
     }
 
-    for (let s0 = 0; s0 < students.length; s0 += BATCH) {
-      const idx = [];
-      for (let k = s0; k < Math.min(s0 + BATCH, students.length); k++) idx.push(k);
-      const res = await Promise.all(idx.map((k, t) => (async () => {
-        if (t) await sleep(250);
-        // 本轮探测任务：优先把这一枚探测钉到"未消耗、严重度最高"的薄弱点上（确定性定位）；
-        // 没有可用薄弱点时，退回原来的串开轮转（probeTarget / probeKind）保证概念覆盖。
-        let wp = null;
-        for (const w of weakPool) { if (!weakConsumed.has(w)) { wp = w; break; } }
-        let target, kind, targetIdx, wpHint = '';
-        const humanUtter = teacherReply || lessonText;
-        if (wp) {
-          weakConsumed.add(wp); weakHits++;
-          target = wp.concept;
-          kind = wp.probeType;
-          targetIdx = wp.conceptIdx;
-        } else {
-          target = probeTarget(concepts, k, round);
-          kind = probeKind(k, round);
-          targetIdx = (((k + round - 1) % Math.max(1, concepts.length)) + Math.max(1, concepts.length)) % Math.max(1, concepts.length);
-        }
-        // TCMQ 确定性提问引擎：把"钉谁/什么类型/引哪句原话/第几层/等多久"算成 spec，LLM 只负责用中文说出口。
+    for (let si = 0; si < speakers.length; si++) {
+      const k = speakers[si];
+      if (si) await sleep(250);   // 免费池并发挤掉（429）防护：发言者之间留一点间隔
+      // 本轮探测任务：优先把这一枚探测钉到"未消耗、严重度最高"的薄弱点上（确定性定位）；
+      // 同一轮多位发言者各取一个不同的薄弱点（按 si 偏移），避免两人问同一处。
+      let wp = null, wi = 0;
+      for (const w of weakPool) { if (!weakConsumed.has(w)) { if (wi++ === si) { wp = w; break; } } }
+      let target, kind, targetIdx, wpHint = '';
+      const humanUtter = teacherReply || lessonText;
+      if (wp) {
+        weakConsumed.add(wp); weakHits++;
+        target = wp.concept;
+        kind = wp.probeType;
+        targetIdx = wp.conceptIdx;
         const spec = buildQuestionSpec({
-          target, probeType: kind, weakPoint: wp || null,
+          target, probeType: kind, weakPoint: wp,
           humanLastUtterance: humanUtter, responseMode: inferResponseMode(teacherReply), round,
         });
         wpHint = renderWpHint(spec);
-        const base = PROBE_ROLES[kind](target);
-        const role = round <= 1 ? base : FOLLOW_PREFIX[(k + round) % FOLLOW_PREFIX.length] + base;
-        return studentTurn(students[k], {
-          i: k, round, lessonTitle, lessonText, concepts,
-          teacherReply: teacherReply || '',
-          peerLines, deadline, target, kind, role, wpHint,
-          targetIdx,
+      } else if (lessonThin) {
+        // 薄教案（口号式空话）：镜子把先生原话**原样举起来**逼落地——不退回占位符、不装作有概念可探
+        kind = 'land'; target = lessonText; targetIdx = 0;
+        wpHint = LAND_HINT(lessonText, round);
+      } else {
+        target = probeTarget(concepts, k, round);
+        kind = probeKind(k, round);
+        targetIdx = (((k + round - 1) % Math.max(1, concepts.length)) + Math.max(1, concepts.length)) % Math.max(1, concepts.length);
+        const spec = buildQuestionSpec({
+          target, probeType: kind, weakPoint: null,
+          humanLastUtterance: humanUtter, responseMode: inferResponseMode(teacherReply), round,
         });
-      })()));
-      idx.forEach((k, t) => { turns[k] = res[t]; });
-      if (s0 + BATCH < students.length) await sleep(400);
+        wpHint = renderWpHint(spec);
+      }
+      const base = PROBE_ROLES[kind](target);
+      const role = round <= 1 ? base : FOLLOW_PREFIX[(k + round) % FOLLOW_PREFIX.length] + base;
+      turns[k] = await studentTurn(students[k], {
+        i: k, round, lessonTitle, lessonText, concepts,
+        teacherReply: teacherReply || '',
+        peerLines, deadline, target, kind, role, wpHint,
+        targetIdx,
+      });
     }
 
     // ⚠️ 2026-09-11 重大更正：这里原来做「接住」自动判定（教师回答与学生问题的 2-gram 重叠）。
@@ -613,11 +581,12 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
       }
     }
 
+    const SILENCE_PAUSE = 2600;   // 认知留白：一位问完，停约 2.6s 再下一位，不抢答、给传授者消化
     const utterances = [];
-    for (let i = 0; i < students.length; i++) {
-      const st = students[i], turn = turns[i];
-      // ⚠️ 2026-09-11：Δp / P / E / σ² / H 与"自评理解度 R"全部删除（见 teaching.js 顶部"停用"说明）。
-      //   学生头顶那条不再表示任何"程度"——它等着**人类在课后逐条判定**后才亮起来。
+    for (let si = 0; si < speakers.length; si++) {
+      const st = students[speakers[si]], turn = turns[speakers[si]];
+      if (si) await sleep(SILENCE_PAUSE);   // 沉默：轮到开口前先留白
+      // ⚠️ 2026-09-11：Δp / P / E / σ² / H 与"自评理解度 R"全部删除。学生头顶不再表示任何"程度"。
       onEvent({ type: 'probe', round, name: st.name, mis: st.mis });
       await sleep(200);
       st.myQ = turn.say;          // 本轮抛出的探测（下一轮收到的回答会回填到 probes 记录上）
@@ -645,7 +614,7 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
     return { round, canContinue };
   }
 
-  // ===== 下课：5 个学生共同产出一份《课堂纪要》（人类的作品/收获），并算出教师的益处 =====
+  // ===== 下课：学生（镜子）产出一份《课堂纪要》（人类的作品/收获），并算出教师的益处 =====
   // 用户定框架：软件的价值是让**人类**整理、升华自己的知识；AI 学生是镜子与提问者，不是学习者。
   async function buildMinutes() {
     const pts = teacherPoints(lessonText);
@@ -656,46 +625,51 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
     const gotIt = probes.filter((p) => p.answer != null);
     const openQ = probes.filter((p) => p.answer == null);
 
+    // 人数随产品决策变化（当前 1 面镜子），纪要提示词与文案都按真实人数生成，不写死"五个"。
+    const names = students.map((s) => s.name);
+    const plural = names.length > 1;
+    const who = plural ? `你们是这学堂里的 ${names.length} 名学生（${names.join('、')}）` : `你是这学堂里唯一的学生（${names[0]}）`;
+
     if (llmUsable()) {
       const sys =
-        `你们是这个学堂里的五个学生（小明、小红、小刚、小丽、小华），刚上完先生的课。` +
-        `现在你们五个一起给先生写一份《课堂纪要》，用中文 Markdown，四个小节：` +
-        `一、先生讲了什么（我们记下的要点）；二、我们原来的想法（可能不对的旧想法）；` +
-        `三、我们问的、先生给了回答的；四、我们问的、先生还没回的（下次请先生补）。` +
-        `注意：你们是来**问**的，不是来夸的；第四节最重要，写得越具体先生越有用。` +
+        `${who}，刚上完先生的课。` +
+        `现在${plural ? '你们一起' : '你'}给先生写一份《课堂纪要》，用中文 Markdown，四个小节：` +
+        `一、先生讲了什么（${plural ? '我们' : '我'}记下的要点）；二、${plural ? '我们' : '我'}原来的想法（可能不对的旧想法）；` +
+        `三、${plural ? '我们' : '我'}问的、先生给了回答的；四、${plural ? '我们' : '我'}问的、先生还没回的（下次请先生补）。` +
+        `注意：你${plural ? '们' : ''}是来**问**的，不是来夸的；第四节最重要，写得越具体先生越有用。` +
         `要具体、说人话、别客套、别用"老师讲得很好"这类空话。每节 2~5 条，短句。只输出 Markdown。`;
       const usr =
         `课题：《${lessonTitle}》\n先生的讲解：${lessonText}\n\n` +
         `课堂实录：\n${memory.map((m) => `${m.speaker}：${m.text}`).join('\n')}\n\n` +
-        `我们各自的旧想法：\n${students.map((s) => `- ${s.name}：${s.mis}`).join('\n')}\n`;
-      const md = await orChat(sys, usr, { maxTokens: 700, timeoutMs: 25000 });
-      if (md && md.length > 60 && !looksLikeCoT(md)) return { md: extractMarkdown(md), by: 'LLM 五生合写' };
+        `${plural ? '我们各自的' : '我的'}旧想法：\n${students.map((s) => `- ${s.name}：${s.mis}`).join('\n')}\n`;
+      const md = await sfChat('chat', sys, usr, { maxTokens: 700, timeoutMs: 25000 });
+      if (md && md.length > 60 && !looksLikeCoT(md)) return { md: extractMarkdown(md), by: 'LLM 镜稿' };
     }
     // 兜底：由本场真实的发言与前概念拼装（不是凭空生成）
     const md = [
       `# 《${lessonTitle}》课堂纪要`,
       '',
-      '## 一、先生讲了什么（我们记下的要点）',
+      '## 一、先生讲了什么（记下的要点）',
       ...(pts.length ? pts.map((p) => `- ${p}`) : ['- （先生这次讲得比较短，没留下成条的要点）']),
       '',
-      '## 二、我们原来的想法（可能不对的旧想法）',
+      `## 二、${plural ? '我们' : '我'}原来的想法（可能不对的旧想法）`,
       ...students.map((s) => `- ${s.name}：${s.mis}`),
       '',
-      '## 三、我们问的、先生给了回答的',
-      // ⚠️ 这里**不再**写"我们弄明白了"——我们只是模拟学生，说"我懂了"是演戏，不是事实。
+      '## 三、问的、先生给了回答的',
+      // ⚠️ 这里**不再**写"弄明白了"——只是模拟学生，说"我懂了"是演戏，不是事实。
       //    也不写"先生答到了"——那需要判定"答没答到"，机器做不到（判据是噪声，已撤）。
-      //    只并排两条**真实文本**："我们问的" + "先生答的"。答到没有，留给人自己看。
+      //    只并排两条**真实文本**："问的" + "先生答的"。答到没有，留给人自己看。
       // say 里已经带了「」→ 用 quotable 去内层引号，免得纪要里出现「…「…」…」套娃
       ...(gotIt.length ? gotIt.map((p) => `- ${p.name}［${probeLabel(p.type) || '探测'}］${quotable(p.say, 30)} —— 先生的回答：${quotable(p.answer, 26)}`)
-        : ['- 我们抛出的问题，先生这一轮还没给回答。']),
+        : ['- 抛出的问题，先生这一轮还没给回答。']),
       '',
-      '## 四、我们问的、先生还没回的（下次请先生补）',
+      '## 四、问的、先生还没回的（下次请先生补）',
       ...(openQ.length ? openQ.map((p) => `- ${p.name}［${probeLabel(p.type) || '探测'}］${p.say}`)
-        : ['- 我们问的，先生都回了。']),
+        : ['- 问的，先生都回了。']),
       '',
-      `> 这份纪要是课上五名学生的发言与旧想法整理出来的（由本地程序拼装，不是 AI 模型写的）。`,
+      `> 这份纪要是课上 ${names.length} 名学生（镜子）的发言与旧想法整理出来的（由本地程序拼装，不是 AI 模型写的）。`,
     ].join('\n');
-    return { md, by: '五生发言拼装' };
+    return { md, by: '本地拼装' };
   }
 
   async function finalize(onEvent, onLog) {
@@ -722,6 +696,22 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
     const clarify = teacherReplies.filter((r) => r.clarifying).length;
     const counts = probeCounts(probes);
     const cov = conceptCoverage(probes, concepts);
+    // Δ 三态（P1+）：把每枚探测的"先生有无回应"落成显式数据结构，镜子永不评分。
+    //   POS=收到且带前提/例子/边界（文本特征）｜BND=收到但偏空泛、留人判｜NEG=没收到。
+    const verdictCounts = { POS: 0, BND: 0, NEG: 0 };
+    for (const p of probes) { p.verdict = probeVerdict(p); verdictCounts[p.verdict]++; }
+    // 路线-cheap 分析层（全部守不评分红线，只认机器可观测的文本事实）：
+    //   按概念归拢三态 → ∂ 下/上近似 · m 证据区间 · Δ* 序贯三枝；ZPD fading 曲线；G 盲区网。
+    const conceptVerdicts = concepts.map((c, j) => ({
+      concept: c, verdicts: probes.filter((p) => p.ci === j).map((p) => p.verdict),
+    }));
+    const rough = roughApprox(conceptVerdicts);                 // ∂：下/上近似 + 边界区
+    const evidence = evidenceInterval(conceptVerdicts);         // m：[Bel, Pl] 诚实证据区间
+    const seqVerdicts = conceptVerdicts.map((cv) => ({
+      concept: cv.concept, verdict: sequentialConceptVerdict(cv.verdicts),
+    }));                                                        // Δ*：问够才三划分
+    const fading = zpdFading(probes);                          // ZPD：脚手架渐退曲线
+    const weakGraph = buildWeakGraph([{ concepts, weakPoints: weakPool, probes }]);  // G：盲区网
     const gains = {
       points: pts.length,                       // 你讲出的要点条数
       replies: teacherReplies.length,           // 你回答了几轮
@@ -731,6 +721,16 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
       probeKinds: counts,
       answered: probes.filter((p) => p.answer != null).length,  // 其中几枚收到了你的回答（事实，非判定）
       open: probes.filter((p) => p.answer == null).length,      // 其中几枚你没回（多为收尾前刚问的）
+      verdictCounts,                             // Δ 三态计数（POS/BND/NEG，机器只认文本事实，不评分）
+      // 路线-cheap 分析层（全部不评分，只认文本事实）：
+      roughLower: rough.lower,                   // ∂ 下近似：全部探测皆 POS 的概念（机器可确定讲清了）
+      roughBoundary: rough.boundary,             // ∂ 边界区：有口子、机器不敢认证，留人判
+      roughUpper: rough.upper,                   // ∂ 上近似：非全 NEG（可能讲清了）
+      evidence,                                  // m 证据区间 [Bel, Pl]（诚实，非伪概率）
+      seqVerdicts,                               // Δ* 序贯三枝：问够才三划分的概念判定
+      fading,                                    // ZPD fading 曲线：脚手架逐轮渐退
+      blindHubs: weakGraph.mainHubs,             // G 主要矛盾：度中心性最高的口子
+      blindClusters: weakGraph.clusters,         // G 盲区聚类：连通分量（哪些口子是一伙的）
       coverage: `${cov.covered}/${cov.total}`,                    // 概念覆盖（信息论，非掌握）
       uncovered: cov.uncovered,
       conceptEntropy: Number(cov.entropy.toFixed(2)),
@@ -750,7 +750,28 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
       + `覆盖≠掌握，只说明"哪些要点被学生逼你讲透了"。`;
     teacherReportMd += '\n\n## 概念覆盖（信息论，非掌握度）\n' + covLine;
 
-    // —— 作品：五生共同的《课堂纪要》落盘 ——
+    // Δ 三态（P1+）：机器只认"先生回答里有没有出现前提/例子/边界"这个文本特征，绝不声称你答透了。
+    teacherReportMd += '\n\n## 探测回应三态（机器只认文本事实，不评分）\n'
+      + `收到且带出前提/例子/边界的（POS）：${verdictCounts.POS} 枚；`
+      + `收到但偏空泛、留给你自己判的（BND）：${verdictCounts.BND} 枚；`
+      + `没收到的（NEG）：${verdictCounts.NEG} 枚。\n`
+      + `POS 只表示"先生的回答里出现了前提/例子/边界"这个文本特征，不代表你答透了——那一步永远由你判。`;
+
+    // 路线-cheap：G 盲区网 + m 证据区间（人话、不评分、不露内部数字）
+    if (weakGraph.mainHubs.length) {
+      teacherReportMd += '\n\n## 你的盲区连成了一张网\n'
+        + `这几处口子被学生反复逼到、又互相连着，是这一课最该回看的主线：`
+        + weakGraph.mainHubs.map((c) => `「${c}」`).join('、') + '。\n';
+      if (weakGraph.clusters.length) {
+        teacherReportMd += '盲区还分了几伙（同一伙的口子是一根链条上的）：'
+          + weakGraph.clusters.map((cl) => cl.map((c) => `「${c}」`).join('→')).join('；') + '。\n';
+      }
+      const wide = evidence.filter((e) => e.n > 0 && (e.plausibility - e.belief) >= 0.5)
+        .map((e) => `「${e.concept}」（探了 ${e.n} 枚，机器还拿不准）`);
+      if (wide.length) teacherReportMd += '有几处机器尤其没把握，值得你多讲一遍：' + wide.join('、') + '。';
+    }
+
+    // —— 作品：学生（镜子）共同的《课堂纪要》落盘 ——
     let minutes = { md: '', by: '', path: '', error: '' };
     let teacherGainFile = '';
     let worldPath = '';
@@ -763,7 +784,7 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
       const file = path.join(dir, `${base}-课堂纪要.md`);
       fs.writeFileSync(file, m.md, 'utf-8');
       minutes = { md: m.md, by: m.by, path: file, error: '' };
-      onLog(`\n《课堂纪要》已由五名学生共同写出 → ${file}`);
+      onLog(`\n《课堂纪要》已由学生（镜子）写出 → ${file}`);
       // 教师的"我的收获"：教中学的核心作品，单独落盘，方便使用者留存/回看
       teacherGainFile = path.join(dir, `${base}-我的收获.md`);
       fs.writeFileSync(teacherGainFile, teacherReportMd, 'utf-8');
@@ -793,7 +814,7 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
     }));
 
     // P0-2：AI 理解笔记（镜子，确定性拼装，不评分不对外）。
-    // 机制（见 docs/理论基座.md §五）：可教代理的硬结论——镜子该把它"学到的"（=人类教的）暴露回给人类，
+    // 机制（见 docs/理论基座.md §四）：镜子该把它"学到的"（=人类教的）暴露回给人类，
     // 含它可能理解错的地方，人类读到"它理解岔了"才照见自己哪句讲歧义了。
     // 本产品不声称 AI 有理解，所以这里全用真实文本拼：旧想法 + 它记下的先生原话 + 它没搞清的 + 一句自我点检。
     // "含错"天然落在两处：没收到的回答（它没得到澄清）+ 它的旧想法 mis（它带着的错）——正把人类盲区镜像回给人。
@@ -824,7 +845,7 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
       + `${gains.probeLine ? '（' + gains.probeLine + '）' : ''} · 其中 ${gains.answered} 枚你回了、${gains.probes - gains.answered} 枚没回`
       + `（"答到没有"由你在课后逐条判——机器只能数词，不能读心）`
       + ` · 概念覆盖 ${gains.coverage}（盲区 ${gains.uncovered.length} 个）· 意义供给(中心性) ${gains.meaning}`);
-    if (!llmUsable()) onLog(`（注：${KEY ? 'LLM 当前不可用：' + (deadReason || '额度/限流') : '未检测到 LINGJING_OR_KEY'}，学生发言走确定性兜底语料）`);
+    if (!llmUsable()) onLog(`（注：${KEY ? 'LLM 当前不可用：' + (llmStatus().reason || '额度/限流') : '未检测到 LLM Key'}，学生发言走确定性兜底语料）`);
 
     const result = {
       lessonTitle, lessonText, concepts, difficulties,
@@ -840,11 +861,14 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
       probes,         // 本课全部探测（真实文本 + 本地复核类型）——产品的一等公民
       probeByConcept, // 按要点归拢的原始提问文本（替代已删的 conceptCaught 比率）
       gains,          // 人类教师的收益（产品目标）
-      minutes,        // 五生共同的《课堂纪要》（作品）
+      minutes,        // 学生（镜子）共同的《课堂纪要》（作品）
       teacherGain: teacherDiag,    // 教中学：教师自身盲区诊断（需求⑥）
       teacherReportMd,            // 教中学：教师人话"我的收获"报告（需求⑥核心交付物）
       weakPoints: weakPool,       // P0-1：确定性检测出的"人类可能讲漏/讲偏"的位置（分析人类文本，非对学生判定）
       weakPointHits: weakHits,    // P0-1：其中被探针钉死的枚数（事实计数，非分数）
+      verdictCounts,              // Δ 三态计数（P1+：POS/BND/NEG，机器只认文本事实，不评分）
+      rough, evidence, seqVerdicts, fading,   // 路线-cheap：∂ / m / Δ* / ZPD（全不评分）
+      weakGraph,                  // G 图论盲区网（节点/边/度中心性排名/聚类）
       aiNotes,                    // P0-2：AI 理解笔记（镜子，含它没搞懂的）——确定性拼装，不评分不对外
       // 双稿制：把 P0-2 aiNotes 确定性转成锁死的「镜稿三块」（AI 初稿·待修订），供课后双稿 UI 用。不评分、不替人定稿。
       mirrorDraft: reflection.buildMirrorDraft(aiNotes),
@@ -913,6 +937,6 @@ if (require.main === module) {
 }
 
 module.exports = {
-  createSession, runClassroom, parseLesson, orChat, oneCall, cleanSay, pickChineseLine, parseTurn, takeSay,
+  createSession, runClassroom, parseLesson, orChat, sfChat, oneCall, cleanSay, pickChineseLine, parseTurn, takeSay,
   fallbackSay, PERSONALITIES, studentTurn, MODEL, MODEL_CHAIN, llmStatus, llmUsable, markDead,
 };

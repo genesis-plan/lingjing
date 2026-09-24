@@ -148,5 +148,99 @@ ok(traj0.entries.length === 1, 'accumulateTrajectory 不改原轨迹（纯函数
 const gpEmpty = reflection.buildGuidedPrompts(empty);
 ok(gpEmpty.length === 0, '空镜稿 → 引导设问为空（不崩）');
 
+// ㉑ 抓主要矛盾：从累积盲区定位最该先啃的一条（频次最高、并列取最具体）
+const trajMC = reflection.accumulateTrajectory(traj1, finalN); // traj1(2 课) + finalN
+const mcPrompt = reflection.buildMainContradictionPrompt(trajMC, finalR);
+ok(mcPrompt && mcPrompt.key === 'main_contradiction', 'buildMainContradictionPrompt 产出 main_contradiction 提示');
+ok(mcPrompt && mcPrompt.text.includes('？'), '抓主要矛盾提示是问句（非陈述）');
+ok(mcPrompt && noEval(mcPrompt.text), '抓主要矛盾提示零评价语');
+const mcNull = reflection.buildMainContradictionPrompt(null, { reserve: '' });
+ok(mcNull === null, '无保留困惑 → 抓主要矛盾返回 null 不崩');
+// 频次优先：两条相同盲区 → 命中且 count 正确
+const fakePrev = { entries: [
+  { blindSpots: ['栈溢出是什么画面'] },
+  { blindSpots: ['栈溢出是什么画面', '递归何时停'] },
+] };
+const mcFreq = reflection.buildMainContradictionPrompt(fakePrev, { reserve: '' });
+ok(mcFreq && mcFreq.count === 2 && mcFreq.target === '栈溢出是什么画面', '抓主要矛盾：重复盲区按频次优先且 count=2');
+
+// ㉒ 自我批评式自判脚手架：坚持(真理) / 修正(错误) 两条，皆问句、零评价
+const sc = reflection.buildSelfCritiquePrompts();
+ok(sc.length === 2 && sc.map((x) => x.key).join(',') === 'uphold,correct', '自我批评脚手架 = 坚持(uphold)/修正(correct)');
+ok(sc.every((x) => x.question.endsWith('？')), '自我批评每条皆问句');
+ok(sc.every(noEval), '自我批评零评价语');
+
+// ㉓ 渐进试错脚手架：先试一小步 / 从试中找漏 两条，皆问句、零评价
+const tp = reflection.buildTrialPrompts();
+ok(tp.length === 2 && tp.map((x) => x.key).join(',') === 'try_first,learn_doing', '渐进试错脚手架 = 先试(try_first)/找漏(learn_doing)');
+ok(tp.every((x) => x.question.endsWith('？')), '渐进试错每条皆问句');
+ok(tp.every(noEval), '渐进试错零评价语');
+
+// ㉔ 效果导向脚手架：证明真懂 / 不拘形式 两条，皆问句、零评价
+const op = reflection.buildOutcomePrompts();
+ok(op.length === 2 && op.map((x) => x.key).join(',') === 'prove_get,ignore_form', '效果导向脚手架 = 证明真懂(prove_get)/不拘形式(ignore_form)');
+ok(op.every((x) => x.question.endsWith('？')), '效果导向每条皆问句');
+ok(op.every(noEval), '效果导向零评价语');
+
+// ㉕ 生成式总结脚手架：挑重点/组织/连已有/能迁移 四锚点，皆问句、零评价；且依跨课轨迹"真会动"
+const sp0 = reflection.buildSummaryPrompts(null);
+ok(sp0.length === 4 && sp0.map((x) => x.key).join(',') === 'select,organize,integrate,extend',
+  '生成式总结 = 挑重点(select)/组织(organize)/连已有(integrate)/能迁移(extend)');
+ok(sp0.every((x) => x.question.endsWith('？')), '生成式总结每条皆问句');
+ok(sp0.every(noEval), '生成式总结零评价语');
+ok(sp0.find((x) => x.key === 'integrate').question === '这一课和你以前知道的什么能连起来？',
+  '无轨迹时 integrate 为通用问句');
+
+// 有轨迹 → select 提示出现"反复卡住"、integrate 提示出现"跨 N 课"（非恒定）
+const spTraj = reflection.buildSummaryPrompts({ entries: [{}, {}], blindSpotCount: 2 });
+ok(/反复卡住的点（共 2 条）/.test(spTraj.find((x) => x.key === 'select').question), '有轨迹 → select 锚点被跨课盲区数具体化');
+ok(/共跨 2 课/.test(spTraj.find((x) => x.key === 'integrate').question), '有轨迹 → integrate 锚点被跨课数具体化');
+ok(spTraj.find((x) => x.key === 'integrate').question !== sp0.find((x) => x.key === 'integrate').question,
+  '生成式总结脚手架"真会动"（有/无轨迹产出不同）');
+
+// ㉖ 跨课复习调度（SM-2 间隔 + 遗忘曲线；只提示到期，不判掌握度）
+const NOW = Date.now(), DAY = 86400000;
+const mkEnt = (daysAgo, spots) => ({ at: new Date(NOW - daysAgo * DAY).toISOString(), summary: '', blindSpots: spots, actions: [] });
+const trajReps1_overdue = { entries: [mkEnt(2, ['递归终止条件谁定'])] };          // 出现1次、2天前→interval=1→到期
+const trajReps1_fresh   = { entries: [mkEnt(0.5, ['边界条件怎么定'])] };       // 出现1次、半天前→未到期
+const trajReps2_fresh   = { entries: [mkEnt(20, ['递归终止条件谁定']), mkEnt(3, ['递归终止条件谁定'])] }; // 2次、末次3天前→interval=6→未到期
+const trajReps3_fresh   = { entries: [mkEnt(30, ['递归终止条件谁定']), mkEnt(10, ['递归终止条件谁定']), mkEnt(8, ['递归终止条件谁定'])] }; // 3次→interval=15→未到期
+const trajReps2_overdue = { entries: [mkEnt(30, ['递归终止条件谁定']), mkEnt(20, ['递归终止条件谁定'])] }; // 2次、末次20天前→interval=6→到期
+const ri = (tt) => reflection.reviewItems(tt, NOW);
+ok(ri(trajReps1_overdue)[0].intervalDays === 1, '复习间隔 reps=1 → 1 天');
+ok(ri(trajReps2_fresh)[0].intervalDays === 6, '复习间隔 reps=2 → 6 天（SM-2）');
+ok(ri(trajReps3_fresh)[0].intervalDays === 15, '复习间隔 reps=3 → 6×2.5=15 天（SM-2 乘 EF）');
+ok(ri(trajReps1_overdue)[0].due === true, 'reps=1 且 2 天前→已到期(due)');
+ok(ri(trajReps1_fresh)[0].due === false, 'reps=1 且半天前→未到期');
+ok(ri(trajReps2_overdue)[0].due === true, 'reps=2 且 20 天前→已到期(due)');
+ok(ri(trajReps1_overdue)[0].dueInDays < 0, '到期项 dueInDays 为负（已过间隔）');
+// 只返回到期项，且提示合规
+const rsp = reflection.buildReviewSchedulePrompts({ entries: trajReps1_fresh.entries.concat(trajReps1_overdue.entries) }, NOW);
+ok(rsp.length === 1, '复习调度只返回到期项（未到期的被滤掉）');
+ok(rsp.length === 1 && rsp[0].key === 'review' && rsp[0].title === '该回看了', '复习调度提示 = review/该回看了');
+ok(rsp.every((x) => x.question.endsWith('？')), '复习调度每条皆问句');
+ok(rsp.every(noEval), '复习调度零评价语');
+ok(reflection.buildReviewSchedulePrompts({ entries: [] }, NOW).length === 0, '空轨迹→复习调度为空不崩');
+
+// ㉗ 生成式总结·辅助计算算子（确定性本地启发式；只给候选/链接/度量，不替人定稿）
+const trajAssist = { entries: [
+  { at: '2026-09-01T00:00:00Z', blindSpots: ['递归终止条件怎么定', '边界情况要考虑'], actions: [] },
+  { at: '2026-09-10T00:00:00Z', blindSpots: ['浮点精度误差从哪里来', '边界情况要考虑'], actions: [] },
+] };
+const curAssist = '递归终止条件怎么定才算对';
+const sa1 = reflection.buildSummaryAssist(trajAssist, curAssist);
+const sa2 = reflection.buildSummaryAssist(trajAssist, curAssist);
+ok(JSON.stringify(sa1) === JSON.stringify(sa2), '辅助计算确定性可复现（同输入两次一致）');
+ok(sa1.select.length >= 1 && sa1.select.length <= 3, 'select 返回 1..3 条候选（不超 k）');
+ok(sa1.select.every((x) => typeof x.salience === 'number' && x.salience >= 1), 'select 每条带 salience（非停用词数 ≥1）');
+ok(sa1.integrate.length >= 1, 'integrate 给出与当前文本最像的历史链接（非空）');
+ok(sa1.integrate.every((x) => typeof x.similarity === 'number' && x.similarity >= 0), 'integrate 每条带 similarity 且 ≥0');
+ok(sa1.extend && typeof sa1.extend.text === 'string', 'extend 给出最不像当前文本的历史迁移靶（非空）');
+ok(reflection.compressionRatio('一二三四五六七八九十', '一二三') > 0 && reflection.compressionRatio('一二三四五六七八九十', '一二三') < 1, '压缩比 摘要更短 → (0,1)');
+ok(reflection.compressionRatio('长原文长原文', '长原文长原文') === 1, '压缩比 等长 → 1');
+ok(reflection.compressionRatio('', '') === 1, '压缩比 空输入 → 1（不崩）');
+const sa0 = reflection.buildSummaryAssist(trajAssist, '');
+ok(Array.isArray(sa0.integrate) && sa0.integrate.length === 0 && sa0.extend === null, '无当前文本 → integrate 空、extend 为 null（不崩）');
+
 console.log(`\n反思引擎测试：${pass} 通过 / ${fail} 失败`);
 process.exit(fail ? 1 : 0);

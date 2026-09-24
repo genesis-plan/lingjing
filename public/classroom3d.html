@@ -45,7 +45,7 @@
      改在课后总结里带解释地给出"——现在 R̄/σ²/H 连**生成**都不该生成了（源头是学生自评，是假理论），
      已从 teacher.js / summary.mjs / skillcards.mjs 全部拆除。课后抽屉里给的是**探测清单**（谁问了什么、你答没答到）。 */
   #metrics { display:none !important; }
-  /* ===== 作品：《课堂纪要》（五名学生共同产出，人类这一课的成果） ===== */
+  /* ===== 作品：《课堂纪要》（学生/镜子产出，人类这一课的成果） ===== */
   /* 课后回顾：这是"课室里发生的事"，所以课室不许被抹掉。
      原来 background 用 rgba(8,6,4,.88)，等于把整间 3D 课室盖成一块黑板；
      现在只压暗到能读清，四周留出教室，人一眼就知道自己还在课室里。 */
@@ -284,21 +284,11 @@ window.addEventListener('unhandledrejection',function(e){var d=document.getEleme
 <div id="jserr" style="display:none;position:fixed;left:8px;top:8px;z-index:99;max-width:60vw;background:#7f1d1d;color:#fff;padding:8px 12px;border-radius:8px;font-size:12px;font-family:monospace"></div>
 <div id="app" data-page-node-id="fAUMWGO6D4qUvMVVCVGlqf">
   <div id="top" class="overlay" data-page-node-id="NZdNREXawhGnBidkyFhwf5"><div class="t" id="boardTitle" data-page-node-id="HwSp24ik9Hboek9M5drpf">灵境 · 课室</div><div class="s" id="boardSub" data-page-node-id="O3iQRC6lz5lDReVyHICsLK">你站在讲台上 · 拖动鼠标环顾课室</div></div>
-  <div id="status" class="overlay">课前 · 5 名学生已在座</div>
+  <div id="status" class="overlay">课前 · 1 名学生（镜子）已在座</div>
   <!-- 合规：AI 身份显著提示（常驻可见，不遮挡操作、不弹窗打断） -->
-  <div id="aiNote" class="overlay"><b>你正在与 AI 交互。</b>这里的 5 名学生由人工智能模拟，不是真人；课后的纪要、卡片与总结由算法根据课堂实录生成，仅供回顾参考，不能替代真实的老师与同学。</div>
-  <div id="metrics" class="overlay" data-page-node-id="PdFzvt5ILBzcksi0q8FF6R">
-    <!-- ⚠️ 2026-09-11：这里原来四个是「疑惑解开 R̄ / 学生差异 σ² / 课堂熵 H / 轮次」。
-         前三者的源头是"学生给自己打的理解分"——模型采样出来的数，不是观测（用户："那是假的理论"）。
-         后来一版改成「学生问出的 / 你接住的 / 还没答到」，但"你接住的"靠 2-gram 自动判定，
-         标定证明是噪声（好回答 0.000、敷衍 0.333），也拆了。
-         现在这三个数**全是事实**：学生问出几枚探测、其中几枚你给了回答、几枚你还没回。
-         "答到了没有"这个问题界面上不回答——它只存在于你课后读完清单之后的脑子里。 -->
-    <div class="m" data-page-node-id="2VA1axfwsBTFnAYfntGXMr"><div class="n" id="mProbe">–</div><div class="l">学生问出的</div></div>
-    <div class="m" data-page-node-id="hYiY2A6P2L2ulM7iwzHIsU"><div class="n" id="mAnswered" data-page-node-id="MS4BRFipcgcgtAOUEP8z0v">–</div><div class="l">你回了的</div></div>
-    <div class="m" data-page-node-id="Hmetric"><div class="n" id="mOpen" data-page-node-id="mHval">–</div><div class="l">还没回的</div></div>
-    <div class="m" data-page-node-id="Bw5ooVujCFz6u6exthnK4T"><div class="n" id="mN">–</div><div class="l">轮次</div></div>
-  </div>
+  <div id="aiNote" class="overlay"><b>你正在与 AI 交互。</b>这名学生（镜子）由人工智能模拟，不是真人；课后的纪要、卡片与总结由算法根据课堂实录生成，仅供回顾参考，不能替代真实的老师与同学。</div>
+  <!-- 体验层不显示任何内部指标（轮次/探测数/接住数）：这些是产品内部数据，
+       按设计全部搬进课后抽屉（"你这一课"一节），人家是来体验的，不是来查数据的。 -->
   <div id="bubbles" data-page-node-id="P0xLViD4Ci03WNnOE7GRRA"></div>
   <div id="cbub" class="bub" data-page-node-id="cbub"></div>
   <div id="tsay" class="overlay"><span class="lbl">你：</span><span id="tsayText"></span></div>
@@ -323,16 +313,17 @@ window.addEventListener('unhandledrejection',function(e){var d=document.getEleme
       <input id="replyText" placeholder="今天你想讲什么？把你要教的东西说出来…（回车）" />
       <button id="replySend">开始上课</button>
       <button id="replySkip" class="ghost2" style="display:none">跳过</button>
-      <button id="mic" class="ghost2">🎤 语音讲</button>
+      <button id="mic" class="ghost2">🎤 语音</button>
       <span class="chips" id="chips">
         <i>随手一课：</i>
+        <a data-demo="天地人::天、地、人。天，是我们抬头看见的天空，会下雨、会出太阳；地，是我们脚下踩着的大地，能种庄稼、能走路；人，就是你、我、他——活在这天地之间、会说话、会问为什么的我们。">小学第一课《天地人》</a>
         <a data-demo="光合作用::阳光不是植物的「饭」，它只是能量的来源；植物真正吃的是自己用光和水造出来的糖。叶子发黄，多半不是缺肥，而是缺光或水太多。">光合作用</a>
         <a data-demo="手机摄影::优先用自然光，逆光拍人要让脸转向光源；构图先找线条，再用三分法把主体放在交点上。别用数码变焦，走近一点。">手机摄影</a>
         <a data-demo="为什么天是蓝的::阳光里有各种颜色，蓝光波长短，被空气分子散射得更厉害，所以从各个方向都进到你眼里；傍晚阳光要穿过更厚的空气，蓝光散没了，剩下红橙。">天为什么蓝</a>
       </span>
     </div>
   </div>
-  <!-- 作品：五名学生共同产出的《课堂纪要》
+  <!-- 作品：学生（镜子）共同产出的《课堂纪要》
        ⚠️ 课后这一屏不许是"一堵字"。实测过：改造前这里是一份 3103 字、要滚 3.48 屏的纯文字文档，
           人一眼看到的是阅读器，不是课室。现在分节：首屏只留"这一课发生了什么"
           （曲线 + 课前对照 + 你的收获），资料性的收进 <details>，想看再点开。
@@ -469,10 +460,15 @@ const $ = (id) => document.getElementById(id);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x1a120a);   // 暖暗（民国学堂夜/黄昏底）
 scene.fog = new THREE.Fog(0x1a120a, 9, 24);
-const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.1, 100);
+// near 从 0.1 提到 0.5：房间最前物体距相机≥2m，0.5 不会裁切；6m 处深度精度提升约 20 倍，
+// 所有薄间隙(墙裙/黑板/匾额/挂轴)的 z-fight 余量一次性放大，配合下方"单面网格"彻底消闪。
+const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.5, 100);
 camera.position.set(0, 1.6, 3.4);
 let renderer;
 try {
+  // 标准深度缓冲（不开 logarithmicDepthBuffer）：对数深度缓冲在开 MSAA 抗锯齿时
+  // 反而让大面积平面（墙/地板）闪烁（已知 artifact，正对应"山水画后/下墙体闪"）。
+  // z-fighting 一律用物理间距根除：侧墙壁画距墙 0.15m、后墙挂轴距墙 0.18m、黑板离木框前 0.06m。
   renderer = new THREE.WebGLRenderer({ antialias:true });
 } catch (err) {
   document.body.innerHTML = '<div style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:24px;font:16px/1.7 sans-serif;color:#e8ebf2;background:#0b1020"><div><p>当前环境不支持 WebGL，无法渲染 3D 课室。</p><p>请用 <b>Chrome / Edge</b> 打开本页，或改用 2D 版：<a href="/classroom.html" style="color:#a5b4fc">/classroom.html</a></p></div></div>';
@@ -522,7 +518,11 @@ const wallMat = new THREE.MeshStandardMaterial({color:0xcdb892, roughness:1});
 const wainscotMat = new THREE.MeshStandardMaterial({map: woodTexture('#5a3c1e', 10, 23), roughness:.9});
 function addWall(w,h,x,y,z,ry){
   const wall=new THREE.Mesh(new THREE.PlaneGeometry(w,h), wallMat); wall.position.set(x,y,z); wall.rotation.y=ry; scene.add(wall);
-  const wc=new THREE.Mesh(new THREE.PlaneGeometry(w,1.3), wainscotMat); wc.position.set(x,0.65,z); wc.rotation.y=ry; scene.add(wc);
+  // ⚠️ 墙裙(wainscot)必须沿墙法线内移 0.03m：原 wc 与墙用同一 (x,y,z) 同朝向 → 完全共面 → 深度缓冲分不出前后
+  //    → 每面墙底部 1.3m 整条 z-fight 闪（用户报"下面的墙体都闪"）。内移即离开共面。
+  const off=0.06;
+  const wc=new THREE.Mesh(new THREE.PlaneGeometry(w,1.3), wainscotMat);
+  wc.position.set(x+Math.sin(ry)*off, 0.65, z+Math.cos(ry)*off); wc.rotation.y=ry; scene.add(wc);
 }
 addWall(16,8, 0,4,-6, 0);             // 后墙
 addWall(16,8, -8,4,0, Math.PI/2);     // 左墙
@@ -531,50 +531,87 @@ addWall(16,8, 8,4,0, -Math.PI/2);     // 右墙
 const ceil=new THREE.Mesh(new THREE.PlaneGeometry(16,16), new THREE.MeshStandardMaterial({color:0x3a2a16, roughness:1}));
 ceil.rotation.x=Math.PI/2; ceil.position.y=8; scene.add(ceil);
 for(let i=-2;i<=2;i++){ const beam=new THREE.Mesh(new THREE.BoxGeometry(16,0.24,0.24), frameMat); beam.position.set(0,7.82,i*2.8); scene.add(beam); }
-// 朱底毛笔匾额（民国学堂校训：礼义廉耻）
-const bannerFrameM=new THREE.Mesh(new THREE.BoxGeometry(6.3,1.8,0.08), frameMat); bannerFrameM.position.set(0,6.4,-5.96); scene.add(bannerFrameM);
-const banner=new THREE.Mesh(new THREE.PlaneGeometry(6,1.5), new THREE.MeshBasicMaterial({map:bannerTexture('礼义廉耻')}));
-banner.position.set(0,6.4,-5.9); scene.add(banner);
+// 朱底毛笔匾额（民国学堂校训：礼义廉耻）——单块薄板，正面贴朱底毛笔纹理，无叠面，杜绝 z-fight
+const banner=new THREE.Mesh(new THREE.BoxGeometry(6.3,1.8,0.1), new THREE.MeshStandardMaterial({map:bannerTexture('礼义廉耻'), roughness:.8}));
+banner.position.set(0,6.4,-5.8); scene.add(banner);
 
-// ===== 水墨山水：贴在「空间表面」上，绝不立在人前 =====
-// 原则（用户指正）：课室是三维空间，山水是空间的表皮（墙/顶/地），不是挡在学生前的板子。
-// 教师视角下 5 名学生必须始终可见 → 学生前方的地面通道完全清空，不放假屏风。
-const screenTexA = new THREE.TextureLoader().load('students/screen_a.jpg'); screenTexA.colorSpace = THREE.SRGBColorSpace;
-const screenTexB = new THREE.TextureLoader().load('students/screen_b.jpg'); screenTexB.colorSpace = THREE.SRGBColorSpace;
-// 山水壁纸材质：平铺 + 自发光（暖暗环境里也看得清，像"透光的画")
-function inkMat(tex, rx, ry){
-  const t = tex.clone(); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(rx, ry);
-  t.colorSpace = THREE.SRGBColorSpace; t.needsUpdate = true;
-  return new THREE.MeshStandardMaterial({ map:t, emissive:0xffffff, emissiveMap:t, emissiveIntensity:0.34, roughness:1 });
+// ===== 2026-09-18 用户指正：课室要是「战争年代（民国）土墙木桌教室」，不是古风水墨画堂 =====
+// 原先左右侧墙整面水墨山水壁画（screen_a/b）+ 黑板两侧山水挂轴，把这间民国学堂变成了古风画堂，
+// 全部**删除、不再引用**（students/screen_a.jpg、screen_b.jpg 自此不再加载）。
+// 保留课室本来的民国骨架：土色墙面 + 深木墙裙 + 房梁 + 黑板 + 朱底匾额「礼义廉耻」+ 民国木讲桌。
+
+// ===== 2026-09-18：补上设计里写的「木格窗」——让课室有窗、有阳光照进来、有悬挂的煤油灯 =====
+// 参考 room/classroom.jpg（民国土墙教室：两侧木格窗 + 阳光斜射 + 房梁吊灯）。全部程序化，零外部素材。
+// 1) 木格窗：木外框 + 竖横木格 + 透光窗芯（暖阳光）。贴左右侧墙、面朝室内，绝不挡教师看学生的视线。
+function paneTexture() {   // 上亮下暖的日光渐变（窗外透进来的光，不是一块死亮的板）
+  const c = document.createElement('canvas'); c.width = 64; c.height = 256; const x = c.getContext('2d');
+  const gr = x.createLinearGradient(0, 0, 0, 256);
+  gr.addColorStop(0, '#fff9e4'); gr.addColorStop(0.55, '#ffe6ab'); gr.addColorStop(1, '#f2cb82');
+  x.fillStyle = gr; x.fillRect(0, 0, 64, 256);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
 }
-// 左右侧墙：整面山水壁画（墙裙以上到顶，6.6m 高 × 15.7m 长，横向平铺 2 幅，比例不失真）
-const muralL = new THREE.Mesh(new THREE.PlaneGeometry(15.7, 6.6), inkMat(screenTexA, 2, 1));
-muralL.rotation.y = Math.PI/2; muralL.position.set(-7.94, 4.6, 0); scene.add(muralL);
-const muralR = new THREE.Mesh(new THREE.PlaneGeometry(15.7, 6.6), inkMat(screenTexB, 2, 1));
-muralR.rotation.y = -Math.PI/2; muralR.position.set(7.94, 4.6, 0); scene.add(muralR);
-// 黑板两侧：大幅山水挂轴（平贴在后墙上，厚度仅 0.05m，不占空间）
-function makeScroll(x){
+const paneMat = new THREE.MeshBasicMaterial({ map: paneTexture() });
+function makeWindow(x, z, w, h) {
   const g = new THREE.Group();
-  const frame = new THREE.Mesh(new THREE.BoxGeometry(2.45, 4.5, 0.05), frameMat); g.add(frame);
-  const art = new THREE.Mesh(new THREE.PlaneGeometry(2.25, 4.3), inkMat(x<0 ? screenTexA : screenTexB, 1, 1));
-  art.position.z = 0.035; g.add(art);
-  g.position.set(x, 3.55, -5.82); scene.add(g);
+  g.add(new THREE.Mesh(new THREE.PlaneGeometry(w, h), paneMat));   // 透光窗芯（阳光）
+  const mk = (gw, gh, px, py) => { const m = new THREE.Mesh(new THREE.BoxGeometry(gw, gh, 0.09), frameMat); m.position.set(px, py, 0.04); g.add(m); };
+  const bT = 0.18;
+  mk(w + bT * 2, bT, 0, h / 2 + bT / 2); mk(w + bT * 2, bT, 0, -h / 2 - bT / 2);      // 上下框
+  mk(bT, h + bT * 2, -w / 2 - bT / 2, 0); mk(bT, h + bT * 2, w / 2 + bT / 2, 0);      // 左右框
+  for (let i = 1; i <= 2; i++) mk(0.07, h, -w / 2 + w * i / 3, 0);                     // 竖木格
+  for (let j = 1; j <= 3; j++) mk(w, 0.07, 0, -h / 2 + h * j / 4);                     // 横木格
+  g.position.set(x, 4.1, z);
+  g.rotation.y = (x < 0) ? Math.PI / 2 : -Math.PI / 2;   // 左墙朝 +x、右墙朝 -x，都面朝室内
+  scene.add(g);
 }
-makeScroll(-6.35); makeScroll(6.35);
+for (const wz of [-4.3, 0, 4.3]) { makeWindow(-7.92, wz, 2.6, 4.3); makeWindow(7.92, wz, 2.6, 4.3); }
 
-// 黑板（动态写教案）
-function makeBoardTexture(title, body){
-  const c = document.createElement('canvas'); c.width=1024; c.height=512; const x=c.getContext('2d');
-  x.fillStyle='#0c1f17'; x.fillRect(0,0,1024,512);
-  x.fillStyle='#dff5e6'; x.font='bold 46px KaiTi, STKaiti, "Kaiti SC", 楷体, serif'; x.fillText('《'+title+'》', 40, 70);
-  x.font='32px KaiTi, STKaiti, "Kaiti SC", 楷体, serif'; let y=130; const lines=(body||'').split(''); let line='';
-  for(const ch of lines){ line+=ch; if(line.length>22){ x.fillText(line,40,y); y+=44; line=''; } }
-  if(line) x.fillText(line,40,y);
-  const t = new THREE.CanvasTexture(c); t.needsUpdate=true; return t;
+// 2) 阳光斜射进屋：左右各一盏暖光，从窗外打向室内（日光成束感）
+function windowSun(px, pz, tx, tz) {
+  const s = new THREE.SpotLight(0xffdfae, 0.95, 30, Math.PI / 2.8, 0.7);
+  s.position.set(px, 5.0, pz); s.target.position.set(tx, 0, tz);
+  scene.add(s); scene.add(s.target);
 }
-const board = new THREE.Mesh(new THREE.PlaneGeometry(9,4.5), new THREE.MeshStandardMaterial({map:makeBoardTexture('灵境·课室','站在讲台上，面对你的学生。'), roughness:.9}));
-board.position.set(0,3.2,-5.9); scene.add(board);
-const boardFrame = new THREE.Mesh(new THREE.BoxGeometry(9.4,4.9,0.2), new THREE.MeshStandardMaterial({color:0x6b4f2a})); boardFrame.position.set(0,3.2,-6.0); scene.add(boardFrame);
+windowSun(-7.4, -1.2, 2.2, 0.2); windowSun(7.4, -1.2, -2.2, 0.2);
+
+// 3) 地面光斑：阳光透过窗格落在地上（加法混合 = 发光感；贴地、不挡视线）
+const patchMat = new THREE.MeshBasicMaterial({ color: 0xffe3ab, transparent: true, opacity: 0.20, blending: THREE.AdditiveBlending, depthWrite: false });
+function sunPatch(x, z, w, d, rot) {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), patchMat);
+  m.rotation.x = -Math.PI / 2; m.rotation.z = rot || 0; m.position.set(x, 0.02, z); scene.add(m);
+}
+sunPatch(-4.7, -1.6, 3.4, 5.2, 0.30); sunPatch(-4.7, 2.6, 3.0, 3.6, 0.30);
+sunPatch(4.7, -1.6, 3.4, 5.2, -0.30); sunPatch(4.7, 2.6, 3.0, 3.6, -0.30);
+
+// 4) 悬挂的煤油灯（房梁垂线 + 铁盖 + 暖黄灯芯 + 一盏暖光）——教室正中偏后，对应照片里那盏
+(function hangingLamp(x, y, z) {
+  const cord = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 8 - y, 6), frameMat);
+  cord.position.set(x, (8 + y) / 2, z); scene.add(cord);
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.24, 0.24, 14), new THREE.MeshStandardMaterial({ color: 0x2a1c0c, metalness: .35, roughness: .6 }));
+  cap.position.set(x, y + 0.18, z); scene.add(cap);
+  const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.17, 16, 12), new THREE.MeshBasicMaterial({ color: 0xfff2c8 }));
+  bulb.position.set(x, y, z); scene.add(bulb);
+  const glow = new THREE.PointLight(0xffd9a0, 0.55, 13); glow.position.set(x, y, z); scene.add(glow);
+})(0, 5.2, -2.6);
+
+// 黑板（单面：木框画进纹理，无叠面；明显立于墙前 0.3m，杜绝 z-fight；墨绿板面+木边框=真黑板质感）
+function makeBoardTexture(title, body){
+  const c = document.createElement('canvas'); c.width=1024; c.height=560; const x=c.getContext('2d');
+  x.fillStyle='#6b4a28'; x.fillRect(0,0,1024,560);                 // 木框底
+  x.fillStyle='#5a3c1e'; for(let i=0;i<26;i++){ x.globalAlpha=0.10; x.fillRect(i*40,0,2,560); } x.globalAlpha=1;  // 木纹
+  x.fillStyle='#10301f'; x.fillRect(56,52,912,456);                // 墨绿板面
+  x.fillStyle='rgba(255,255,255,0.045)';                          // 粉笔灰
+  for(let i=0;i<46;i++){ x.beginPath(); x.arc(56+Math.random()*912, 52+Math.random()*456, 8+Math.random()*44, 0, 7); x.fill(); }
+  x.fillStyle='#f3f7ee'; x.textAlign='left'; x.textBaseline='alphabetic';
+  x.font='bold 52px KaiTi, STKaiti, "Kaiti SC", 楷体, serif'; x.fillText('《'+title+'》', 96, 142);
+  x.font='34px KaiTi, STKaiti, "Kaiti SC", 楷体, serif'; let y=212; const chars=(body||'').split(''); let line='';
+  for(const ch of chars){ line+=ch; if(line.length>20){ x.fillText(line,96,y); y+=48; line=''; } }
+  if(line) x.fillText(line,96,y);
+  const t = new THREE.CanvasTexture(c); t.colorSpace=THREE.SRGBColorSpace; t.needsUpdate=true; return t;
+}
+const board = new THREE.Mesh(new THREE.PlaneGeometry(9.4,4.9),
+  new THREE.MeshStandardMaterial({map:makeBoardTexture('灵境·课室','站在讲台上，面对你的学生。'), roughness:.95}));
+board.position.set(0,3.2,-5.7); scene.add(board);
 
 // ===== 讲台（民国木讲桌：教案本 + 粉笔盒 + 铜铃 + 茶缸 + 教鞭）=====
 // 第一人称"我站在讲台后"的实体锚点：桌沿正好落在画面下缘，学生全身仍不被遮挡（几何核算见 docs）。
@@ -661,8 +698,17 @@ function buildStudents(list){
     return;
   }
   avatars.forEach(a=>scene.remove(a)); avatars.length=0; studentsData=list;
-  const positions = [ [-3,-2.2],[-1.5,-2.6],[0,-2.9],[1.5,-2.6],[3,-2.2] ];
-  const H = 1.9; // 立绘世界高度
+  // 座位按人数居中：1 人正中、且拉近到前排（z=-1.9）并放大，成为清晰的"坐在你面前桌后的学生"，
+  // 而不是远处一个小头像浮在空教室里；多人沿横向均分（外侧略靠前，和原 5 座布局一致）。
+  const n = list.length;
+  const positions = (n === 1) ? [[0, -1.9]]
+    : Array.from({ length: n }, (_, i) => {
+        const spread = Math.min(6, (n - 1) * 1.5);
+        const x = -spread / 2 + spread * i / (n - 1);
+        const z = -2.9 + Math.abs(x) * 0.233;
+        return [x, z];
+      });
+  const H = (n === 1) ? 2.35 : 1.9; // 单人时立绘更高更有存在感；多人恢复原尺寸
   list.forEach((s,i)=>{
     const g = new THREE.Group();
     const col = COLORS[i%COLORS.length];
@@ -677,11 +723,10 @@ function buildStudents(list){
     const plane = new THREE.Mesh(new THREE.PlaneGeometry(w,H), mat);
     plane.position.set(0, BOT + H/2, -0.30);
     g.add(plane);
-    // 头顶：只有名签。**没有进度条**——AI 学生头顶不该有任何"程度"读数（见上方删除说明）。
-    const label = makeLabel(s.name+' · '+s.trait, col); label.position.y = BOT+H+0.75; label.scale.set(0.55,1.24,1); g.add(label);
+    // 头顶不挂任何标签：名字/性格都是内部人设，不在体验层出现（AI 学生头顶也不该有任何"程度"读数）
     const [px,pz]=positions[i];
     g.position.set(px,0,pz);
-    g.userData = { name:s.name, trait:s.trait, mis:s.mis||'', plane, desk, label, baseZ:pz, color:col,
+    g.userData = { name:s.name, trait:s.trait, mis:s.mis||'', plane, desk, baseZ:pz, color:col,
       status:'idle', speakT:0, act:0.15, padLean:0.10, stand:false };
     scene.add(g); avatars.push(g);
   });
@@ -710,14 +755,12 @@ function pulseSpeak(name){ const a=avatars.find(v=>v.userData.name===name); if(a
 //   而且是真正有用的信息——"他这次是在拿反例戳你，还是在问你边界"。
 const PROBE_LABEL = { counter:'反例', bound:'边界', example:'正例', distinct:'区分', mechanism:'机制', apply:'应用' };
 const bubbleEls = {};
-function showBubble(name, text, mis, probeType){
+// 气泡只显示学生说的话。名字/探测标签/前概念是内部信息，不在体验层出现——
+// 哪个立绘发光、头顶冒泡，自然标识了说话者（见 bubbleEls 投影定位）。
+function showBubble(name, text){
   let el = bubbleEls[name];
   if(!el){ el=document.createElement('div'); el.className='bub'; $('bubbles').appendChild(el); bubbleEls[name]=el; }
-  let html = '<b>'+escapeHtml(name)+'</b>：'+escapeHtml(text||'（未发言）');
-  const lb = PROBE_LABEL[probeType];
-  if(lb) html += '<div class="rf">［'+lb+'］</div>';
-  if(mis) html += '<div class="mis">他进课堂前以为：'+escapeHtml(mis)+'</div>';
-  el.innerHTML = html;
+  el.innerHTML = escapeHtml(text || '（未发言）');
   el.classList.add('show');
   clearTimeout(el._t); el._t = setTimeout(()=>{ el.classList.remove('show'); }, 6800);
 }
@@ -864,16 +907,19 @@ function animate(){
     const el=bubbleEls[a.userData.name]; if(!el) return;
     a.userData.plane.getWorldPosition(tmp); tmp.y += 1.0;   // 立绘头顶上方
     tmp.project(camera);
-    if(tmp.z>1){ el.style.display='none'; return; }
-    el.style.display='block';
+    // ⚠️ 不能用 display:none/block 切换：相机呼吸（±0.02x / ±0.012y）会让边缘学生气泡的 NDC 深度
+    //    反复跨过远裁剪面(tmp.z=1)，display 不可过渡且切 none↔block 会触发重排 → 气泡逐帧闪。
+    //    改用 visibility（不重排）+ 抬到 1.3 的隐藏阈值：在前的学生 NDC z≈0.9，呼吸绝不会跨过，
+    //    只有真转到相机背后(tmp.z>1.3)才藏。
+    if(tmp.z > 1.3){ el.style.visibility = 'hidden'; return; }
+    el.style.visibility = 'visible';
     el.style.left = ((tmp.x*0.5+0.5)*innerWidth)+'px';
     el.style.top = ((-tmp.y*0.5+0.5)*innerHeight)+'px';
   });
-  // 灵境数学：课堂热场按真实 3D FTCS 推进（上课中每 2 帧一步，稳定可见；课前/下课后随相位停或冷却）
+  // 灵境数学：课堂热场按真实 3D FTCS 推进（仅作课后「数学真实在跑」的数据源，不再渲染成光团）
   if (heat) {
     if (phase !== 'idle' && (heatTick = (heatTick + 1) % 2) === 0) heat.step();
-    updateHeatCloud();
-    worldSyncEnergy();                            // 物理载体能量实时同步进 World.M
+    worldSyncEnergy();                            // 物理载体能量实时同步进 World.M（不渲染，仅课后数学用）
   }
   renderer.render(scene, camera);
 }
@@ -882,85 +928,20 @@ function animate(){
 requestAnimationFrame(animate);
 addEventListener('resize', ()=>{ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); });
 
-// ===== 灵境数学：3D 热传导场（真 PDE）=====
+// ===== 灵境数学：课堂热场（真 3D FTCS，仅计算、不渲染）=====
 // 框架原文：物理是「载体」，不声称模拟真实世界。这里用真实的 3D FTCS 把"老师讲解注入的能量"
-// 渲染成会扩散、会冷却的悬浮体素云——看得见咱们的数学在跑，不是装饰。
-// 同时把课堂接进核心世界模型 World = ⟨S, R, M, T⟩（公理3：你的讲解=不可计算的外部输入，引擎只承接不生成）。
+// 演化成会扩散、会冷却的温度场——它的能量(heat.energy())作为课后「数学真实在跑」的数据源之一，
+// 同步进世界测度 World.M。
+// ⚠️ 用户 2026-09-18 明确：悬浮在课室上方的「教学能量场」光团与产品设计理念相悖、给使用者不好的体验，
+//   已从体验中彻底移除——不渲染、无开关、无 ?glow。下面只保留静默计算（不再有任何可见的光）。
 const HEAT_N = 9;                                  // 网格（奇数，唯一原点在中心）
-const HEAT_REF = 1.2;                              // 归一参考温度：注入 1.0 ≈ 明亮暖色，课前微温 ≈ 暗蓝
+const HEAT_REF = 1.2;                              // 归一参考（供课后 heatNorm 用）
 let heat = null;
 try {
   // λ = α·dt/dx² = 0.12·0.1/1 = 0.012 ≤ 1/6 → 3D FTCS 稳定（physics.js 同款 fail-closed 护栏）
   heat = new HeatWorld3D({ n: HEAT_N, dx: 1, alpha: 0.12, dt: 0.1 });
-  heat.init(() => 0.035);                          // 课前：一点微温，让"课堂场"隐约可见；上课后由讲解点燃
+  heat.init(() => 0.035);
 } catch (e) { heat = null; console.warn('HeatWorld3D 初始化失败（CFL 护栏拒启）：', e); }
-
-// 体素云悬浮在课室正上方（学生头顶之上、匾额之下，黑板前）
-const HEAT_CENTER = new THREE.Vector3(0, 4.6, -3.2);
-const HEAT_SPAN = 3.0;                             // 体素云总边长（世界单位）
-const heatGeo = new THREE.BufferGeometry();
-const heatPos = new Float32Array(HEAT_N * HEAT_N * HEAT_N * 3);
-const heatCol = new Float32Array(HEAT_N * HEAT_N * HEAT_N * 3);
-heatGeo.setAttribute('position', new THREE.BufferAttribute(heatPos, 3));
-heatGeo.setAttribute('color', new THREE.BufferAttribute(heatCol, 3));
-const heatMat = new THREE.PointsMaterial({
-  size: 0.36, vertexColors: true, transparent: true, opacity: 0.95,
-  depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true,
-});
-const heatCloud = new THREE.Points(heatGeo, heatMat);
-scene.add(heatCloud);
-
-// 预计算每个体素的世界坐标（网格中心对齐 HEAT_CENTER）
-const heatWorldPos = [];
-for (let z = 0; z < HEAT_N; z++) for (let y = 0; y < HEAT_N; y++) for (let x = 0; x < HEAT_N; x++) {
-  const fx = (x - (HEAT_N - 1) / 2) / ((HEAT_N - 1) / 2) * (HEAT_SPAN / 2);
-  const fy = (y - (HEAT_N - 1) / 2) / ((HEAT_N - 1) / 2) * (HEAT_SPAN / 2);
-  const fz = (z - (HEAT_N - 1) / 2) / ((HEAT_N - 1) / 2) * (HEAT_SPAN / 2);
-  heatWorldPos.push([HEAT_CENTER.x + fx, HEAT_CENTER.y + fy, HEAT_CENTER.z + fz]);
-}
-// 温度 → 颜色（冷蓝 → 暖橙红 → 亮黄）
-const HEAT_COLD = new THREE.Color(0x2b3a8f), HEAT_WARM = new THREE.Color(0xff5a1f), HEAT_HOT = new THREE.Color(0xffe08a);
-const _hc = new THREE.Color();
-function heatColor(out, t) {
-  if (t < 0.5) out.copy(HEAT_COLD).lerp(HEAT_WARM, t / 0.5);
-  else out.copy(HEAT_WARM).lerp(HEAT_HOT, (t - 0.5) / 0.5);
-  return out;
-}
-// 把当前温度场刷进体素云（位置固定，只更新颜色/亮度；低温体素压暗≈接近透明）
-function updateHeatCloud() {
-  if (!heat) return;
-  const u = heat.u, n = heat.n;
-  let k = 0;
-  for (let z = 0; z < n; z++) for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
-    const val = u[idx(x, y, z, n)];
-    const wp = heatWorldPos[k];
-    heatPos[k * 3] = wp[0]; heatPos[k * 3 + 1] = wp[1]; heatPos[k * 3 + 2] = wp[2];
-    // 用固定参考温度归一（不随当前最大值漂移）：课前微温≈暗蓝，老师注入≈明亮暖色
-    const t = Math.max(0, Math.min(1, val / HEAT_REF));
-    heatColor(_hc, t);
-    const b = 0.10 + 0.90 * t;                     // 低温压暗（Additive 下≈透明），高温明亮
-    heatCol[k * 3] = _hc.r * b; heatCol[k * 3 + 1] = _hc.g * b; heatCol[k * 3 + 2] = _hc.b * b;
-    k++;
-  }
-  heatGeo.attributes.position.needsUpdate = true;
-  heatGeo.attributes.color.needsUpdate = true;
-}
-// 字段标题（诚实标注这是真数学载体，不是氛围贴图）
-function makeCaption(text) {
-  const c = document.createElement('canvas'); c.width = 512; c.height = 96; const x = c.getContext('2d');
-  x.fillStyle = 'rgba(18,12,6,.78)'; x.fillRect(0, 0, 512, 96);
-  x.fillStyle = '#ffeecb'; x.font = 'bold 34px KaiTi, STKaiti, 楷体, serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
-  x.fillText(text, 256, 50);
-  const t = new THREE.CanvasTexture(c);
-  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, transparent: true, depthTest: false }));
-  sp.scale.set(2.6, 0.49, 1);
-  return sp;
-}
-const heatCaption = makeCaption('教学能量场 · 3D 热传导 FTCS');
-heatCaption.position.set(HEAT_CENTER.x, HEAT_CENTER.y + HEAT_SPAN / 2 + 0.35, HEAT_CENTER.z);
-scene.add(heatCaption);
-// 兜底：极端情况下热场初始化失败（CFL 护栏拒启），则不渲染体素云，避免原点出现游离亮斑
-if (!heat) { heatCloud.visible = false; heatCaption.visible = false; }
 
 // ===== 灵境核心世界模型：World = ⟨S, R, M, T⟩，把课堂接进框架 =====
 let world = null;
@@ -986,8 +967,11 @@ let heatTick = 0;
 // 设计铁律（用户 2026-09-10 定框架）：
 //   ① 一打开就是教室，不是文字聊天面板——讲台只是讲台，不属于对话框；
 //   ② 学生的头顶是「疑惑解开度 R」，不是"理解度"——一段话不可能让 5 人一次全懂；
-//   ③ 课的价值是让**人类**整理、升华自己的知识：下课由 5 名学生共同交出《课堂纪要》（作品）+ 你的收益。
+//   ③ 课的价值是让**人类**整理、升华自己的知识：下课由学生（镜子）交出《课堂纪要》（作品）+ 你的收益。
 const askbar=$('askbar'), replyText=$('replyText'), micBtn=$('mic');
+
+// 免费模型工具（翻译/思考/配图/组合/云端语音）属产品内部能力，不在体验层露入口；
+// 入口只保留文本输入 + 🎤 语音（见讲台 askbar）。后端 /api/llm /api/image /api/asr 仍可用。
 let sessionId = null;
 let phase = 'idle';
 let finishing = false;
@@ -1008,8 +992,7 @@ function loadJournal() { try { const s = localStorage.getItem(JKEY); return s ? 
 function saveJournal(j) { try { localStorage.setItem(JKEY, JSON.stringify(j)); } catch (e) { /* 隐私模式等：静默降级 */ } }
 
 const FALLBACK_ROSTER = [
-  { name:'小明', trait:'好奇' }, { name:'小红', trait:'严谨' }, { name:'小刚', trait:'活泼' },
-  { name:'小丽', trait:'害羞' }, { name:'小华', trait:'自信' },
+  { name:'小明', trait:'好奇' },
 ];
 
 function showTeacherSay(text){
@@ -1055,8 +1038,7 @@ function handleEvent(ev){
     worldReset(ev.students||[]);
     worldInjectLesson(ev.lessonTitle, ev.lessonText);
     if (heat) { heat.u.fill(0); heat.init(() => 0.035); heat.injectAt(1, 1.0); } // 教师开讲＝能量注入场中心
-    $('mProbe').textContent='–'; $('mAnswered').textContent='–'; $('mOpen').textContent='–'; $('mN').textContent='1';
-    $('boardSub').textContent='你站在讲台上 · 5 名学生带着各自的旧想法进了课堂';
+    $('boardSub').textContent='你站在讲台上 · 1 名学生（镜子）带着旧想法进了课堂';
     ceremony(); // 上课铃 → 起立问好 → 点名
     return;
   }
@@ -1064,9 +1046,7 @@ function handleEvent(ev){
     // 老师这段回话，回的就是**上一轮**学生抛出的那批探测（服务端就是这个时序）。
     // 于是这里能算出一个纯事实：你回了的探测枚数 +上一轮抛出的枚数。
     if(ev.teacherReply && pendingProbes > 0){
-      answeredProbes += pendingProbes; pendingProbes = 0;
-      $('mAnswered').textContent = String(answeredProbes);
-      $('mOpen').textContent = String(Math.max(0, roundProbes - answeredProbes));
+      answeredProbes += pendingProbes; pendingProbes = 0;   // 计数供课后抽屉用，体验层不显示
     }
     avatars.forEach(a=>{ a.userData.status='listen'; setAct(a.userData.name, 0.45); });
     if(ev.teacherReply) showTeacherSay(ev.teacherReply);
@@ -1080,47 +1060,35 @@ function handleEvent(ev){
   if(ev.type==='ask'){
     const a=avatars.find(v=>v.userData.name===ev.name);
     setStatus(ev.name,'ask'); setAct(ev.name, 0.95); pulseSpeak(ev.name);
-    showBubble(ev.name, ev.text, (a && a.userData.mis) || '', ev.probeType);   // 带上"他进课堂前以为…"
+    showBubble(ev.name, ev.text);   // 只显示学生说的话；名字/标签/前概念不露体验层
     transcript.push(ev.name+'：'+ev.text);
     // 课堂记录：只留**真实说过的话**（供课后卡片把"学生问过的原话"当回顾题）
     clsAsks.push({ round: curRound, name: ev.name, say: ev.text, probeType: ev.probeType, mis: (a && a.userData.mis) || '' });
     return;
   }
   if(ev.type==='round_end'){
-    $('mN').textContent = String(ev.round);
     curRound = (Number(ev.round) || 0) + 1;   // 本轮结束 → 进入下一轮（供时序标注）
-    // 三个数全是"数得出来"的事实：学生这一轮抛出几枚探测、累计多少枚、其中几枚你回了
     const thisRound = Number(ev.probeCount)||0;
     roundProbes += thisRound;
-    pendingProbes = thisRound;                // 这一批还在等你回话（下一轮开头回话时结算）
-    $('mProbe').textContent = String(roundProbes);
-    $('mAnswered').textContent = String(answeredProbes);
-    $('mOpen').textContent = String(Math.max(0, roundProbes - answeredProbes));
-    // 氛围亮度：原来由"知识态分布的 Shannon 熵"驱动（已废），后来由"接住率"驱动（噪声判定，也废）。
-    // 现在由**这一轮学生提问的密度**驱动——问得越密，课室越热。纯计数，不涉及任何判定。
-    currentH = clampJS(0.25 + 0.75*Math.min(1, thisRound/5), 0, 1);
-    // 诚实标注：本轮到底几个学生是真 LLM 在说（0/5 可能是额度用尽，也可能是模型返回空）
-    $('status').textContent = '第 '+ev.round+' 轮结束 · 学生抛出 '+thisRound+' 枚探测（累计 '+roundProbes+' 枚）· ' + (typeof ev.llmOk==='number'
-      ? (ev.llmOk>0 ? ('真 LLM 学生 '+ev.llmOk+'/5') : '本轮 0/5 走真 LLM（额度/限流或模型返回空）· 学生走兜底语料')
-      : '—');
+    pendingProbes = thisRound;                // 这一批还在等你回话（下一轮开头回话时结算，供课后抽屉用）
+    // 氛围亮度：由这一轮学生提问的密度驱动（纯计数，不涉及任何判定）。分母取 2（每轮最多 2 人开口）。
+    currentH = clampJS(0.25 + 0.75*Math.min(1, thisRound/2), 0, 1);
+    // 状态条只说人话：有学生提问了、轮到你回应——不暴露内部指标 / LLM 技术状态（那些在课后抽屉）
+    $('status').textContent = '有学生提问了，想想怎么回';
     if(ev.canContinue){ phase='reply'; setBar('reply'); setBusy(false); setTimeout(()=>replyText.focus(),80); }
     else finishClass();                                                          // 最后一轮 → 自动收尾
     return;
   }
   if(ev.type==='done'){
     phase='done';
-    const g = ev.gains || {};
-    $('mProbe').textContent = String(g.probes!=null ? g.probes : roundProbes);
-    $('mAnswered').textContent = String(g.answered!=null ? g.answered : answeredProbes);
-    $('mOpen').textContent = String(g.open!=null ? g.open : Math.max(0, roundProbes - answeredProbes));
     setBar('hide'); setBusy(false);
-    renderWork(ev);
+    renderWork(ev);   // 内部指标（探测数/接住数）由课后抽屉的"你这一课"一节呈现，不在体验层
     return;
   }
   if(ev.type==='error'){ showErr('出错了：'+ev.message); setBusy(false); if(phase==='busy'){ phase='reply'; setBar('reply'); } }
 }
 
-// ===== 作品渲染：《课堂纪要》（5 名学生共同交出）+ 你自己的收获 =====
+// ===== 作品渲染：《课堂纪要》（学生/镜子交出）+ 你自己的收获 =====
 // 极简 Markdown → HTML（只支持纪要会用到的：标题/列表/粗体/引用），避免引第三方库。
 function mdToHtml(md){
   const inline = (s)=>escapeHtml(s).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/`(.+?)`/g,'<code>$1</code>');
@@ -1326,7 +1294,7 @@ function renderWork(ev){
   const title = ev.lessonTitle || '这一课';
   $('wkTitle').textContent = '《'+title+'》课堂纪要';
   // 人话优先：这里给的是"这节课发生了什么"，不摊内部指标（R̄/σ²/技术状态见下面的课后总结与角标）
-  const bits = ['你和 5 名学生聊了 '+((ev.rounds||[]).length)+' 轮'];
+  const bits = ['你和 '+((ev.students||[]).length || 1)+' 名学生（镜子）聊了 '+((ev.rounds||[]).length)+' 轮'];
   bits.push('这份纪要由他们的发言整理而成');
   $('wkSub').textContent = bits.join(' · ');
   $('wkPath').textContent = m.path ? ('已落盘：'+m.path) : (m.error ? ('纪要落盘异常：'+m.error) : '');
@@ -1347,7 +1315,7 @@ function renderWork(ev){
         const lb = PROBE_LABEL[p.probeType] || '探测';
         const has = p.answer != null;
         return '<div class="prow'+(has?'':' gap')+'">'
-          + '<span class="pt">第'+p.round+'轮 · '+escapeHtml(p.name)+'［'+lb+'］</span>'
+          + '<span class="pt">第'+p.round+'轮</span>'
           + '<span class="pq">'+escapeHtml(p.say)+'</span>'
           + (has
             ? '<span class="pa">你答：'+escapeHtml(String(p.answer))+'</span>'
@@ -1360,13 +1328,12 @@ function renderWork(ev){
       + '我**不替你判"答到了没有"**——机器只能数词，不能读心。我们试过按"你的回答和他的问题文字重叠"自动判：'
       + '好回答能得 0.000（你换了词），敷衍的一句"好的下次再讲"反而得 0.333（它复述了他的用词），是噪声，已撤掉。'
       + '所以这一步留给你：**逐条读过去，哪一条你心里咯噔一下，那就是你自己知识里的口子。**'
-      + '「反例/边界/正例/区分/机制/应用」这六类标签，是本地正则对那句话的复核（不采信模型自报）。'
       + '这份报告里**没有**任何"学生理解了百分之多少""你答到了百分之多少"的数字——'
       + '那种数只能由模型随口给，我们算得出来，但那是编的。');
   const openList = probes.filter(p=>p.answer == null);
   $('wkBlind').innerHTML = (openList.length
     ? '<b>这 '+openList.length+' 枚你还没回</b>（多是收尾前刚问的，但它们往往最尖）：<br>'
-      + openList.map(p=>'· '+escapeHtml(p.name)+'第'+p.round+'轮［'+(PROBE_LABEL[p.probeType]||'探测')+'］'+escapeHtml(p.say)).join('<br>')
+      + openList.map(p=>'· 第'+p.round+'轮：'+escapeHtml(p.say)).join('<br>')
     : '学生这一课抛出的探测，你都给了回答。但**答了 ≠ 答到**——把上面那张清单逐条读一遍，自己判断哪几条其实没答到点上。');
   // ===== 课后技能卡片组（用 World/热场数学把你的传授反哺成可复习的卡）=====
   try {
@@ -1697,7 +1664,7 @@ $('pSkip').onclick = () => {
 function onSend(){
   const t=replyText.value.trim();
   if(phase==='busy'||phase==='done') return;
-  if(phase==='idle'){ if(t) beginExplore(t); return; }
+  if(phase==='idle'){ if(t) startClass(t); return; }   // 一打开就是教室：输入即开课，不进"先猜"课前探索（那是给人类当学习者的设计，与本产品"人讲·AI照镜"错位）
   if(phase==='explore'){ if(t) submitAttempt(t); return; }
   if(phase==='preready'){ if(t) { $('probe').classList.remove('on'); startClass(t); } return; }
   tellStudents(t);
@@ -1705,10 +1672,12 @@ function onSend(){
 $('replySend').onclick=onSend;
 $('replySkip').onclick=()=>{ if(phase==='reply') tellStudents(''); };
 replyText.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); onSend(); } });
+// 打开即预填一个示例（不强制）：回车就开课；想讲自己的清空再写。去掉"先猜"课前闸门后，人类一进来就能直接体验。
+replyText.value = '天地人::天、地、人。天，是我们抬头看见的天空，会下雨、会出太阳；地，是我们脚下踩着的大地，能种庄稼、能走路；人，就是你、我、他——活在这天地之间、会说话、会问为什么的我们。';
 $('chips').addEventListener('click',e=>{
   const a=e.target.closest('a[data-demo]'); if(!a || phase!=='idle') return;
   const t=a.getAttribute('data-demo')||'';
-  beginExplore(t);   // 先让人类自己猜两次（生产性失败），再开讲
+  replyText.value = t; startClass(t);   // 示例一键开课（不强制、不进课前探索）；想讲自己的清空再写
 });
 $('again').onclick=()=>location.reload();
 // 课后回顾 ↔ 课室：双向都能走。关掉回顾不是"关闭弹窗"，是回到那间还有学生的教室。
@@ -1756,7 +1725,7 @@ $('dlJournal').onclick=()=>{
 };
 
 // ===== 打开页面 = 已经坐在/站在教室里（不是先弹一个文字面板）=====
-// 先把 5 名学生摆进教室，再等老师开口。名单来自 GET /api/roster（静态人设）。
+// 先把学生（镜子）摆进教室，再等老师开口。名单来自 GET /api/roster（静态人设）。
 // 诚实标注：LLM 状态分四档（verified/unverified/no-key/circuit-open），不谎称"真 LLM 学生在场"。
 function llmLine(llm){
   switch((llm||{}).state){
@@ -1775,7 +1744,7 @@ async function boot(){
     $('status').textContent = llmLine(r.llm);
   }catch(e){
     buildStudents(FALLBACK_ROSTER);
-    $('status').textContent = '名单读取失败（'+((e&&e.message)||e)+'）· 已用本地名单摆好 5 名学生';
+    $('status').textContent = '名单读取失败（'+((e&&e.message)||e)+'）· 已用本地名单摆好 '+FALLBACK_ROSTER.length+' 名学生';
   }
 }
 boot();

@@ -1,6 +1,6 @@
 'use strict';
 /*
- * 灵境·课室 — 教学知识模型（BKT / ReKT(2024) / 性格驱动 LLM 学生模拟）
+ * 灵境·课室 — 教学知识模型（含确定性薄弱点定位层、性格驱动学生模拟）
  * --------------------------------------------------------------------------
  * 本文件是纯数学模型（无网络、无 LLM 依赖），由 teacher.js 编排调用。
  *
@@ -51,13 +51,35 @@ const GAMMA = 0.05; // 定义3：每轮遗忘因子（单会话可忽略，但�
 function clamp(x, lo, hi) { return Math.max(lo, Math.min(hi, x)); }
 
 // 定义1：知识点抽取。可选显式给（"讲解||概念1|概念2"），否则按句切分自动抽 ≤5
+// ⚠️ 2026-09-18 修：旧版在"单句薄教案"时退回占位符 ['核心概念1','核心概念2','核心概念3']，
+//    导致全班学生的"探测要点"都指向不存在的「核心概念」，与先生原话毫无关系（用户实测"数学是一种思维"即中招）。
+//    现改为：单句薄教案把**整句作为唯一要点**返回，绝不退回占位符——学生逼先生把这句讲透。
 function extractConcepts(text, provided) {
   if (Array.isArray(provided) && provided.length) return provided.slice(0, 5);
-  const parts = (text || '').split(/[。！？；\n]+/).map((s) => s.trim()).filter(Boolean);
-  if (parts.length >= 3) return parts.slice(0, 5);
-  const byComma = (text || '').split(/[，,、]+/).map((s) => s.trim()).filter(Boolean);
-  if (byComma.length >= 3) return byComma.slice(0, 5);
-  return ['核心概念1', '核心概念2', '核心概念3'];
+  const raw = (text || '').trim();
+  if (!raw) return [];
+  const parts = raw.split(/[。！？；.!?;\n]+/).map((s) => s.trim()).filter((s) => s.length >= 2);
+  if (parts.length >= 2) return parts.slice(0, 5);
+  const byComma = raw.split(/[，,、]+/).map((s) => s.trim()).filter((s) => s.length >= 2);
+  if (byComma.length >= 2) return byComma.slice(0, 5);
+  return [raw]; // 单句薄教案：整句即要点
+}
+
+// 讲得"虚不虚"：薄教案（只抛观点、没例子没机制没数字）应当被镜子学生举起来逼落地。
+// 返回 { thin, reason }。thin=true 时 teacher.js 走"落地挑战"分支（见 playRound 的 land 路径）。
+// 用词特征（确定性）：示例锚点 / 机制过程（把..变、通过、因为..所以..）/ 数字 / 引号。
+function assessLessonConcreteness(text) {
+  const t = (text || '').trim();
+  if (!t) return { thin: true, reason: '一句话都没讲' };
+  const hasNumber = /\d/.test(t);
+  const hasExample = /(比如|例如|比方|举个|比如说|拿.*说|举个例子|譬如|生活里|我见过)/.test(t);
+  const hasMechanism = /(步骤|先.*再|首先|然后|因为.*所以|如果.*那么|等于|得到|算出|证明|原因是|原理|机制|把.*变|变成|通过|利用|产生|生成|形成|转化|由.*组成|包括|分为)/.test(t);
+  const hasQuote = /[“‘"](.+?)[”’"]/.test(t);
+  const anchors = [hasNumber, hasExample, hasMechanism, hasQuote].filter(Boolean).length;
+  const len = t.length;
+  if (anchors === 0) return { thin: true, reason: '只有观点、没有具体例子或机制' };
+  if (len <= 16 && anchors <= 1) return { thin: true, reason: '太短、落点单薄' };
+  return { thin: false, reason: '' };
 }
 
 // 难度系数 β_j：按概念文本长度启发式估计（长≈难）。真实场景可由教师预设/系统估计
@@ -173,7 +195,17 @@ const MISCONCEPTION_TPL = [
   (a) => `以为「${a}」一直是这样，不知道还有例外`,
   (a) => `把「${a}」背下来了，但说不清它到底是怎么来的`,
 ];
-function guessMisconception(i, concepts) {
+// 薄教案（只一句话、且虚）时的"前概念"：不编造具体错处，只表达对这句口号式的空话的茫然/怀疑——
+// 这才是镜子该有的"带着旧想法进课堂"。避免单概念时旧模板拼出"把X和X当成一回事"病句。
+const THIN_MISCONCEPTION_TPL = [
+  (c) => `我以前一直觉得「${c}」就是句漂亮话，没往心里去`,
+  (c) => `先生说「${c}」，可我平时也没多想，接不上`,
+  (c) => `「${c}」？我听过点耳熟，真要我解释我解释不出来`,
+  (c) => `我老把「${c}」和别的口号混在一起，没分清它特殊在哪`,
+  (c) => `「${c}」我听着像对的，可说不清它到底凭什么成立`,
+];
+function guessMisconception(i, concepts, thin) {
+  if (thin) return THIN_MISCONCEPTION_TPL[i % THIN_MISCONCEPTION_TPL.length](quotable(concepts[0] || '这个说法'));
   const list = (Array.isArray(concepts) && concepts.length) ? concepts : ['这个说法'];
   const a = quotable(list[i % list.length]);
   const b = quotable(list[(i + 1) % list.length]);
@@ -240,16 +272,12 @@ function addressScore(question, teacherReply) {
 //   机制 mechanism —— 为什么会这样，中间是怎么发生的？
 //   应用 apply     —— 要是换成别的，会怎样？
 //
-// 为什么是这六类（文献锚点，2026-09-11 核实）：
-//   · VanLehn (2003) "Why Do Only Some Events Cause Learning during Human Tutoring"：
-//     学习**只在学生到达 impasse（卡住／答错）之后**发生；不卡住时，讲得再好也难学会。
+// 为什么是这六类（确定性方法，已核实）：
+//   · 学习**只在学生到达 impasse（卡住／答错）之后**发生；不卡住时，讲得再好也难学会。
 //     → 学生的职责是**制造 impasse**，不是配合点头。探测就是 impasse 的引信。
-//   · King (2002) Guided Reciprocal Peer Questioning：用**通用句式脚手架**逼出高层认知
-//     （举例／边界／对比／解释为什么／强弱），比让学生"随便问"的产出质量高得多。
-//   · Watson & Mason（learner-generated examples）：让学生自己造**边界例**
-//     ——"没人会想到的正例"＋"别人以为对其实错的非例"。这是"照出盲区"最锋利的一类。
-//   · Schwartz & Biswas（Teachable Agents / Betty's Brain）：学习-by-教学中**真正学的是人类**，
-//     可教代理是镜子；镜子该做的，是把它"学到的"（＝人类教的）暴露回给人类。
+//   · 通用句式脚手架逼出高层认知（举例／边界／对比／解释为什么／强弱），比让学生"随便问"的产出质量高得多。
+//   · 让学生自己造**边界例**——"没人会想到的正例"＋"别人以为对其实错的非例"。这是"照出盲区"最锋利的一类。
+//   · 学习-by-教学中**真正学的是人类**；可教代理是镜子，该把它"学到的"（＝人类教的）暴露回给人类。
 //
 // ⚠️ 诚实标注：探测**由 LLM 扮演的学生生成**，它不是真人学生。它的价值不在"它学会了"，
 //   而在"它问出的东西，能不能让人类发现自己没讲透"。
@@ -262,6 +290,9 @@ const PROBE_TYPES = [
   { key: 'distinct',  label: '区分',   hint: '这两个说法到底差在哪？我总把它们搞混' },
   { key: 'mechanism', label: '机制',   hint: '为什么会这样，中间是怎么发生的？' },
   { key: 'apply',     label: '应用',   hint: '要是换成别的，会怎样？' },
+  // 2026-09-18 加：薄教案（口号式空话）专用。镜子把先生原话**原样举起来**逼落地——
+  // 问"这到底什么意思／拿件具体的事说明白"，而不是装作有现成概念可探。
+  { key: 'land',      label: '落地',   hint: '把你听到的话原样举起来：这到底什么意思？拿一件具体的事说明白' },
 ];
 const PROBE_LABELS = PROBE_TYPES.map((p) => p.label);
 const PROBE_RE = [
@@ -285,7 +316,7 @@ function probeLabel(key) {
 }
 // 本课探测构成：**计数**，不是分数。回答"这一课，学生把你往哪些方向逼了"
 function probeCounts(probes) {
-  const out = { counter: 0, bound: 0, example: 0, distinct: 0, mechanism: 0, apply: 0, unknown: 0 };
+  const out = { counter: 0, bound: 0, example: 0, distinct: 0, mechanism: 0, apply: 0, land: 0, unknown: 0 };
   for (const p of probes || []) {
     const k = p && p.type;
     if (k && out[k] != null) out[k]++; else out.unknown++;
@@ -304,7 +335,7 @@ function probeSummaryLine(counts) {
 }
 
 // ================== 确定性薄弱点定位层（P0-1，2026-09-15 加）==================
-// 设计哲学（见 docs/理论基座.md §四）：AI 学生不做被计算的对象、不评分；但"照出人类盲区"必须**确定性**——
+// 设计哲学（见 docs/理论基座.md §三）：AI 学生不做被计算的对象、不评分；但"照出人类盲区"必须**确定性**——
 // 不靠 LLM 自由发挥猜人类哪里讲漏了（那会退化成"不管输入什么他们都回那几句"）。
 // 本层对人类讲解文本做**可解释、可复现**的弱信号检测，把"可能讲漏 / 讲偏"的位置钉出来，
 // 喂给探针调度：哪枚探测去逼哪个口子，有依据。
@@ -314,10 +345,10 @@ function probeSummaryLine(counts) {
 //   jump     逻辑跳跃 A→C   —— 推理词出现但前句无前提标记（缺中间的 B）
 //   abstract 具体→抽象      —— 抽象词出现但本句无生活例 / 数字锚点
 //   parrot   用原话非自己话 —— 连续两句高度重复（疑似背定义）
-//   omit     前提盲区(WYSIATI)—— 把断言讲成定论却没给启用条件（Kahneman 2011：缺失前提不"感觉"缺失）
+//   omit     前提盲区 —— 把断言讲成定论却没给启用条件（人默认的前提不"感觉"缺失）
 // 五类信号 → 六类探测映射（确定性，证据见理论基座.md §四.3 / §十.11 / §十.12）：
 //   jargon→example  jump→mechanism  abstract→counter  parrot→apply  omit→bound
-// 调度优先级：omit/jump 且带高信心标记 → 严重度 +1（上限 5），优先钉（hypercorrection 最高收益窗口）。
+// 调度优先级：omit/jump 且带高信心标记 → 严重度 +1（上限 5），优先钉（高信心缺口最高收益窗口）。
 
 function wpKeywordsOf(c) {
   const raw = String(c || '').replace(/[「」""'']/g, '').trim();
@@ -329,15 +360,14 @@ const WP_INFER = /(所以|因此|于是|这就|说明|可见|推出|意味着|�
 const WP_PREM = /(因为|由于|前提|条件是|需要|基于|假设|首先|第一步)/;
 const WP_ABSTRACT = /(本质|规律|核心|根本|抽象|意义上|层面|维度|结构|框架|范式|底层|底层逻辑)/;
 const WP_CONCRETE = /(比如|例如|我|生活|见过|去年|上次|实际|具体|数字|\d|％|%|％)/;
-// —— 第 5 类信号：前提盲区（WYSIATI / Kahneman 2011）——
+// —— 第 5 类信号：前提盲区 ——
 // 人用已有信息拼出自洽故事、把没说的前提当成"不存在"。钉：把断言陈述成确定/普适、却没给启用条件。
 // 命中条件（确定性，降误报）：① 含确定/普适标记 ② 含"成立/适用/有效"等断言动词 ③ 无弱化语 ④ 非问句。
 const WP_CERTAIN = /(一定|肯定|必然|当然|总是|永远|全都|都是|所有|无一例外|毫无例外|没有例外|就是|注定)/;
 const WP_QUAL = /(除非|除了|例外|除外|前提|不一定|未必|可能|也许|有时候|某些情况|大多数|通常|一般|往往|如果.*(不成立|不)|并非所有|例外情况)/;
 const WP_CLAIM = /(适用|成立|正确|有效|能|会|是|对|没问题|行得通|靠谱|管用|错不了)/;
 // 高信心标记（用于"高信心缺口优先"，见下 wpSeverityOf）：定论式、毋庸质疑的口吻。
-// 来源：hypercorrection effect（Metcalfe & Butterfield 2001）——人对高信心错误反而纠正得最持久，
-//       因为"自信却错了"触发元认知惊讶→注意捕获→编码增强。故 P0-1 调度应优先钉高信心缺口。
+// 人对高信心错误反而纠正得最持久——"自信却错了"触发元认知惊讶→注意捕获→编码增强，故调度应优先钉高信心缺口。
 const WP_ASSERT_CONF = /(显然|毫无疑问|肯定|必定|铁定|就是|注定|绝对|永远|一定|毋庸置疑|明摆着)/;
 const WP_SIGNAL_LABEL = {
   jargon: '用了术语却没解释',
@@ -350,9 +380,104 @@ const WP_SEVERITY = { jargon: 2, jump: 3, abstract: 1, parrot: 1, omit: 3 };
 const WP_STRATEGY = { jargon: 'example', jump: 'mechanism', abstract: 'counter', parrot: 'apply', omit: 'bound' };
 function weakPointToProbeType(signal) { return WP_STRATEGY[signal] || 'apply'; }
 
+// ================== Δ 三态判定（P1+，镜子永不评分落到显式数据结构）==================
+// 每枚探测对「先生有无回应」只有机器可观测的**文本事实**，不声称知道人类/AI 懂没懂：
+//   NEG = 探测没收到的回答（口子还开着，事实计数）
+//   POS = 探测收到回答，且回答带出前提/例子/边界（isClarifying 文本特征，非判定理解）
+//   BND = 探测收到回答，但回答偏空泛未澄清 → 机器不替人认证"答透了"，留给人自己判（诚实标记）
+// 三态互斥、确定性、跨输入必不同（否则是摆设）。verdict 字段挂到每枚 probe 上，供课后清单与报告消费。
+function probeVerdict(probe) {
+  const hasAnswer = probe && probe.answer != null && String(probe.answer).trim().length > 0;
+  if (!hasAnswer) return 'NEG';
+  return isClarifying(probe.answer) ? 'POS' : 'BND';
+}
+
+// ================== 路线-cheap：∂ 下/上近似 · m 证据区间 · Δ* 序贯三枝 · ZPD fading =================
+// 全部守"不评分"红线：只认机器可观测的文本事实（verdict POS/BND/NEG），绝不声称懂没懂。
+// ⚠️ 防摆设：每个函数都跨输入真变动（见 tools/test_rough_approx.mjs 等），恒为定值即失败。
+
+// ∂ 粗糙集下/上近似（路线）：给定每概念的三态分布，算边界区 B_t。
+//   下近似 POS* = 全部探测皆 POS 的概念（文本特征上机器可确定"先生讲清了这件事"）
+//   上近似 UPP* = 非全部 NEG 的概念（至少一枚没判死，可能讲清了）
+//   边界 BND*  = UPP* \ POS*（有口子、机器不敢认证，留给人类判）
+// 输入：conceptVerdicts = [{concept, verdicts:[...]}]；verdicts 为 'POS'|'BND'|'NEG' 数组。
+function roughApprox(conceptVerdicts) {
+  const rows = (conceptVerdicts || []).map((row, i) => ({
+    concept: row.concept != null ? row.concept : ('概念' + (i + 1)),
+    verdicts: Array.isArray(row.verdicts) ? row.verdicts : (row.verdicts != null ? [row.verdicts] : []),
+  }));
+  const byConcept = rows.map((r) => {
+    const v = r.verdicts, n = v.length;
+    const pos = v.filter((x) => x === 'POS').length;
+    const neg = v.filter((x) => x === 'NEG').length;
+    let state = 'BND';
+    if (n > 0 && pos === n) state = 'POS';        // 全 POS → 落进下近似
+    else if (n > 0 && neg === n) state = 'NEG';   // 全 NEG → 落进上近似外
+    return { concept: r.concept, n, pos, neg, state };
+  });
+  const lower = byConcept.filter((x) => x.state === 'POS').map((x) => x.concept);
+  const upper = byConcept.filter((x) => x.state !== 'NEG').map((x) => x.concept);
+  const boundary = byConcept.filter((x) => x.state === 'BND').map((x) => x.concept);
+  return { lower, upper, boundary, byConcept };
+}
+
+// m 证据区间（路线）：D-S 词汇的诚实降级——只报 [Bel, Pl]，绝不说伪概率。
+//   Bel = 已证"讲清了"的比例（POS/n）= 下界；Pl = 1 - 已证"没讲清"的比例（NEG/n）= 上界。
+//   区间越宽＝机器越没把握，诚实留给人类判。
+function evidenceInterval(conceptVerdicts) {
+  return (conceptVerdicts || []).map((row, i) => {
+    const v = Array.isArray(row.verdicts) ? row.verdicts : (row.verdicts != null ? [row.verdicts] : []);
+    const n = v.length || 1;
+    const pos = v.filter((x) => x === 'POS').length;
+    const neg = v.filter((x) => x === 'NEG').length;
+    return {
+      concept: row.concept != null ? row.concept : ('概念' + (i + 1)),
+      n: v.length,
+      belief: Math.round((pos / n) * 100) / 100,
+      plausibility: Math.round((1 - neg / n) * 100) / 100,
+    };
+  });
+}
+
+// Δ* 序贯三枝（路线）：把"问够才三划分"落成显式序贯判定。
+//   单枚 probeVerdict 是即时事实；"这个概念到底讲清没"要看多枚探测的合取。
+//   ① 探测 < minProbes 枚 → 一律 BND（问得不够，机器不急着判）
+//   ② 达阈值后：全 POS → POS；全 NEG → NEG；否则 BND。
+function sequentialConceptVerdict(verdicts, minProbes = 2) {
+  const v = Array.isArray(verdicts) ? verdicts : [];
+  if (v.length < minProbes) return 'BND';
+  const pos = v.filter((x) => x === 'POS').length;
+  const neg = v.filter((x) => x === 'NEG').length;
+  if (pos === v.length) return 'POS';
+  if (neg === v.length) return 'NEG';
+  return 'BND';
+}
+
+// ZPD fading 曲线（路线）：把"脚手架随轮次渐退"落成可观测序列（不评分，只数文本事实）。
+//   每个 probeType 映射到脚手架档位（1=最轻 bound，6=最重 mechanism/counter/apply 逼生成）；
+//   逐轮算：平均脚手架档位 + 该轮回答率。健康形态＝轮次推进、脚手架档位上升（被逼更难的口子）
+//   + 回答率不塌 → 脚手架在退场、人在独立。
+const ZPD_LEVEL = { bound: 1, example: 2, distinct: 2, apply: 4, counter: 5, mechanism: 6 };
+function zpdFading(probes) {
+  const ps = (probes || []).filter(Boolean);
+  const rounds = [...new Set(ps.map((p) => p.round || 0))].sort((a, b) => a - b);
+  return rounds.map((r) => {
+    const rp = ps.filter((p) => (p.round || 0) === r);
+    const levels = rp.map((p) => ZPD_LEVEL[p.type] || 3);
+    const avg = levels.length ? levels.reduce((a, b) => a + b, 0) / levels.length : 0;
+    const answered = rp.filter((p) => p.answer != null).length;
+    return {
+      round: r,
+      scaffold: Math.round(avg * 100) / 100,
+      probes: rp.length,
+      answeredRate: rp.length ? Math.round((answered / rp.length) * 100) / 100 : 0,
+    };
+  });
+}
+
 // 严重度（基线 + 高信心缺口优先 boost）
 // 基线见 WP_SEVERITY；当信号是 omit/jump 且句子带高信心标记时 +1（上限 5），
-// 让"定论式断言却缺前提/跳步"的薄弱点排在调度最前 → 命中 hypercorrection 最高收益窗口。
+// 让"定论式断言却缺前提/跳步"的薄弱点排在调度最前 → 命中高信心缺口最高收益窗口。
 function wpSeverityOf(sig, sent) {
   let s = WP_SEVERITY[sig] || 1;
   if ((sig === 'omit' || sig === 'jump') && WP_ASSERT_CONF.test(sent)) s = Math.min(5, s + 1);
@@ -365,7 +490,7 @@ function sentenceSignals(sent, prevSent) {
   if (WP_JARGON.test(sent) && !CLARIFY_MARK.test(sent)) out.push('jargon');
   if (WP_INFER.test(sent) && prevSent && !WP_PREM.test(prevSent)) out.push('jump');
   if (WP_ABSTRACT.test(sent) && !WP_CONCRETE.test(sent)) out.push('abstract');
-  // 第 5 类：前提盲区（WYSIATI）。确定/普适断言 + 含成立动词 + 无弱化语 + 非问句。
+  // 第 5 类：前提盲区。确定/普适断言 + 含成立动词 + 无弱化语 + 非问句。
   if (WP_CERTAIN.test(sent) && WP_CLAIM.test(sent) && !WP_QUAL.test(sent)
       && !/[？?]$/.test(sent.trim()) && sent.trim().length > 8) out.push('omit');
   return out;
@@ -590,7 +715,7 @@ function teacherReport(diag, ctx) {
 
 module.exports = {
   PERSONALITIES, GAMMA, clamp,
-  extractConcepts, estimateDifficulty, initP, fallbackUnderstand, teachingEffect, classEntropy,
+  extractConcepts, assessLessonConcreteness, estimateDifficulty, initP, fallbackUnderstand, teachingEffect, classEntropy,
   valueFunction, teachingRelation,
   // 教学认知层
   guessMisconception, teacherPoints, isClarifying, bigrams, overlapScore, addressScore, quotable,
@@ -598,6 +723,10 @@ module.exports = {
   PROBE_TYPES, PROBE_LABELS, classifyProbe, probeLabel, probeCounts, probeSummaryLine,
   // 确定性薄弱点定位层（P0-1：分析人类讲解文本的弱信号，钉探针目标）
   detectWeakPoints, weakPointToProbeType,
+  // Δ 三态判定（P1+：镜子永不评分落到显式数据结构 POS/NEG/BND）
+  probeVerdict,
+  // 路线-cheap：∂ 下/上近似 · m 证据区间 · Δ* 序贯三枝 · ZPD fading 曲线
+  roughApprox, evidenceInterval, sequentialConceptVerdict, zpdFading, ZPD_LEVEL,
   // 教师元认知收益层（教中学）
   jargonMaskedQuotes, teacherDiagnosis, teacherReport,
 };

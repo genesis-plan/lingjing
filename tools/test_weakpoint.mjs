@@ -20,7 +20,7 @@ const B = '我们先把相机拿起来。因此画面更亮了。于是噪点也
 const C_concepts = ['公园', '孩子', '冰淇淋'];
 const C = '今天我和孩子去公园玩。他追着一只蝴蝶跑了很久。回家路上买了冰淇淋。我们都挺开心的。';
 
-//  D = 前提盲区型（WYSIATI：把断言讲成定论却没给启用条件，应触发 omit）
+//  D = 前提盲区型（把断言讲成定论却没给启用条件，应触发 omit）
 const D_concepts = ['方法', '沟通', '团队'];
 const D = '这个方法在所有情况下都适用。沟通一定是越早越好。团队里所有人肯定都认可这个方案。';
 
@@ -63,7 +63,7 @@ ok(weakPointToProbeType('abstract') === 'counter', 'abstract → counter（反�
 ok(weakPointToProbeType('parrot') === 'apply', 'parrot → apply（应用钉"用自己的话讲一遍"）');
 ok(weakPointToProbeType('omit') === 'bound', 'omit → bound（边界钉"什么情况不成立/你默认了什么前提"）');
 
-// ⑧ 第 5 类信号：前提盲区（WYSIATI）在"定论却无启用条件"文本下触发，且平实型不误报
+// ⑧ 第 5 类信号：前提盲区在"定论却无启用条件"文本下触发，且平实型不误报
 ok(countSig(rD, 'omit') >= 1, `前提盲区型触发 omit 信号 (${countSig(rD, 'omit')} 枚)`);
 ok(countSig(rC, 'omit') === 0, `平实型无 omit 误报（对照成立，证明不是逢确定词就报）`);
 ok(rD.some((w) => w.signal === 'omit' && w.severity === 3), 'omit 严重度=3（与 jump 同级，属最深的盲区机制）');
@@ -71,7 +71,7 @@ ok(rD.some((w) => w.signal === 'omit' && w.severity === 3), 'omit 严重度=3（
 // ⑦ 诚实边界：evidence 是句子切片（人类原话），不含任何「AI 懂/不懂」断言
 ok(rA.every((w) => typeof w.evidence === 'string' && w.evidence.length > 0), 'evidence 是人类原话切片（未编造 AI 理解状态）');
 
-// ⑨ 高信心缺口优先（hypercorrection / Metcalfe & Butterfield 2001）：定论式断言缺前提 → 严重度 +1（上限 5）
+// ⑨ 高信心缺口优先：定论式断言缺前提 → 严重度 +1（上限 5）
 const Dc_concepts = ['方法', '沟通'];
 const Dc = '沟通一定是越早越好。这个方法在所有情况下都适用。';   // 含高信心标记 → omit 应 boost 到 4
 const Ds_concepts = ['沟通'];
@@ -80,7 +80,7 @@ const rDc = detectWeakPoints(Dc, Dc_concepts);
 const rDs = detectWeakPoints(Ds, Ds_concepts);
 ok(rDc.some((w) => w.signal === 'omit' && w.severity === 4), `高信心定论缺口 omit 严重度=4（boost 生效：${JSON.stringify(rDc.filter(w=>w.signal==='omit').map(w=>w.severity))}）`);
 ok(rDs.some((w) => w.signal === 'omit' && w.severity === 3), `无高信心标记的同类 omit 严重度=3（对照成立，证明 +1 仅来自高信心）`);
-ok((rDc.find((w) => w.signal === 'omit') || {}).severity > (rDs.find((w) => w.signal === 'omit') || {}).severity, '高信心缺口排在更前（调度优先钉，命中 hypercorrection 最高收益窗口）');
+ok((rDc.find((w) => w.signal === 'omit') || {}).severity > (rDs.find((w) => w.signal === 'omit') || {}).severity, '高信心缺口排在更前（调度优先钉，命中高信心缺口最高收益窗口）');
 
 console.log(fail ? `\n❌ ${fail} 项失败` : '\n✅ P0-1 全部断言通过（跨场景真不同 + 确定性 + 映射 + 诚实边界 + 高信心缺口优先）');
 process.exit(fail ? 1 : 0);

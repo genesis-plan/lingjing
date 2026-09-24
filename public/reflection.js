@@ -6,7 +6,7 @@
 //   2. 完全不评分、不评判、不纠错、不替人下结论 —— 只做"学徒照镜"的反射。
 //   3. 纯函数、可单测、跨输入可复现（见 tools/test_reflection.mjs）。
 //
-// 与 docs/理论基座.md §十.13（双稿制·定稿·不可改动·2026-09-16 锁死）对齐：
+// 与 docs/理论基座.md §十（双稿制·定稿·不可改动·2026-09-16 锁死）对齐：
 //   - AI 镜稿三块（全"我"开头，不评价/不建议/不评分）：
 //       ① 我听到的核心内容  ② 我还没完全明白的地方  ③ 我可能理解偏了的地方
 //   - 人五类修改动作：确认 / 改写 / 补充 / 删除 / 转化
@@ -234,15 +234,10 @@ function stepCount() { return REFLECTION_STEPS.length; }
 function stepLabel(i) { return (i >= 0 && i < REFLECTION_STEPS.length) ? REFLECTION_STEPS[i] : null; }
 function nextStep(i) { return (i >= 0 && i < REFLECTION_STEPS.length - 1) ? i + 1 : null; } // null = 已到末步
 
-// ---- 第二批书单方法论代码化（双稿三阶·镜鉴复盘法 / LJ-GMR 增强层）----
-// 来源映射（详见 docs/理论基座.md §十.14）：
-//   反思性实践(舍恩 reflection-on-action) → 结构化镜鉴提示 + 跨课回看(七步末步)
-//   引导式笔记(达利奥引导日记/一行日记) → 引导式设问生成器 + 成长轨迹累积
-//   元认知与自我评估(监测-调节)        → 元认知自检锚点(盲区/根因/下一步)
-//   形成性评价(为学而评,非评判)        → AI 镜稿恒为形成性、永不为终结性(见 noEval 铁律)
-//   AI之镜(瓦尔or)                     → AI 只当镜子不审判(已锁死) + 镜与不镜提示
-//   复盘方法(联想四步/AAR)             → 复盘四步锚点(目标/结果/原因/规律)
-// 本层只产确定性结构，绝不替人写答案、绝不评分。
+// ---- 双稿三阶·镜鉴复盘法（增强层）----
+// 本层把若干被反复验证过的"照镜子"方法重组为一组确定性脚手架：引导设问、元认知自检、
+// 复盘四步、跨课轨迹。原则只吸收进逻辑与命名，不挂任何外部出处；本层只产确定性结构，
+// 绝不替人写答案、绝不评分（见 noEval 铁律）。
 
 // 引导式设问：基于镜稿三块，给"人"出可操作的反思问题（非陈述、非评价）
 const GUIDED_PROMPT_KINDS = ['confirm', 'rewrite', 'transform'];
@@ -318,6 +313,257 @@ function accumulateTrajectory(prev, finalDraft) {
   };
 }
 
+// ---- 抓主要矛盾 / 自我批评（方法增强；原则只吸收进逻辑，不挂任何出处）----
+// 抓主要矛盾：从累积盲区里定位最该先啃的一条（频次最高、并列取最具体）。
+//   只读、纯函数、不替人编造；对应"先解决主要问题"的工程化表达。
+function mainContradictionOf(traj) {
+  const t = traj || { entries: [] };
+  const freq = {};
+  for (const e of (t.entries || [])) {
+    for (const bs of (e.blindSpots || [])) {
+      const k = String(bs || '').trim();
+      if (!k) continue;
+      freq[k] = (freq[k] || 0) + 1;
+    }
+  }
+  const keys = Object.keys(freq);
+  if (!keys.length) return null;
+  keys.sort((x, y) => (freq[y] - freq[x]) || (y.length - x.length));
+  const top = keys[0];
+  return { text: top, count: freq[top] };
+}
+function buildMainContradictionPrompt(prev, finalDraft) {
+  const here = String((finalDraft && finalDraft.reserve) || '').split('\n').map((x) => x.trim()).filter(Boolean);
+  const merged = (prev && prev.entries) ? prev : { entries: [] };
+  const t = { entries: merged.entries.concat([{ blindSpots: here }]) };
+  const mc = mainContradictionOf(t);
+  if (!mc) return null;
+  const lead = mc.count > 1 ? ('「' + mc.text + '」反复出现（' + mc.count + ' 次）') : ('「' + mc.text + '」');
+  const text = '在这么些保留困惑里，' + lead + '——先啃它：把它转成你下一步最想追问的一个问题？';
+  if (!noEval(text)) throw new Error('抓主要矛盾提示泄漏评价语：' + text);
+  return { key: 'main_contradiction', target: mc.text, count: mc.count, text };
+}
+
+// 自我批评式自判脚手架：人自判"坚持住的(真理) / 要修正的(错误)"，与五类修改、复盘四步互补
+const SELF_CRITIQUE_ANCHORS = [
+  { key: 'uphold',  title: '坚持住的（真理）', desc: '这次我真正搞懂、要一直记牢的一点是什么' },
+  { key: 'correct', title: '要修正的（错误）', desc: '这次我发现原来理解偏了、要改过来的一点是什么' },
+];
+function buildSelfCritiquePrompts() {
+  return SELF_CRITIQUE_ANCHORS.map((a) => ({ key: a.key, title: a.title, question: a.desc + '？' }));
+}
+
+// ---- 渐进试错 / 效果导向（方法增强；原则只吸收进逻辑，不挂出处）----
+// 渐进试错：先拿最小例子试一遍，从"试"里现出没搞清的地方（小步推进、不等想全再动）。
+const TRIAL_ANCHORS = [
+  { key: 'try_first',   title: '先试一小步', desc: '别等想全再动——拿一个最小例子先试一遍' },
+  { key: 'learn_doing', title: '从试中找漏', desc: '试的时候哪里卡住、答不上来，就是我还没搞清的地方' },
+];
+function buildTrialPrompts() {
+  return TRIAL_ANCHORS.map((a) => ({ key: a.key, title: a.title, question: a.desc + '？' }));
+}
+
+// 效果导向：以"能讲清/能用"为真的判据，不拘形式、不重 dogma（看成效而非看样子）。
+const OUTCOME_ANCHORS = [
+  { key: 'prove_get',  title: '我拿什么证明真懂', desc: '是能讲清、能解决一个具体问题，还是只"看了/记了"' },
+  { key: 'ignore_form', title: '不拘形式',       desc: '懂没懂看效果，不看得笔记全不全、答得顺不顺' },
+];
+function buildOutcomePrompts() {
+  return OUTCOME_ANCHORS.map((a) => ({ key: a.key, title: a.title, question: a.desc + '？' }));
+}
+
+// 生成式总结（方法增强；原理只吸收进逻辑，不挂出处）
+// 用自己的话重述要点：挑重点(select) → 组织成一段更短(organize) → 连到已有/上一课(integrate) → 能用到别处(extend)。
+// 写给自己当工具(writer-based)，不拘措辞；照抄原句不是真总结；目的在能迁移到新情境。
+const SUMMARY_ANCHORS = [
+  { key: 'select',   title: '挑最关键的 3 条',   desc: '从你这课的保留与行动里，挑出最关键的 3 条' },
+  { key: 'organize', title: '组织成一段（更短）', desc: '用你自己的话，把 3 条写成一段——比原话更短，别照抄原句' },
+  { key: 'integrate', title: '连到已有的',        desc: '这一课和你以前知道的什么能连起来' },
+  { key: 'extend',   title: '能用到别处',        desc: '这 3 条如果换一个完全不是这堂课的场景，你会怎么用' },
+];
+function buildSummaryPrompts(prev, fd) {
+  const out = SUMMARY_ANCHORS.map((a) => ({ key: a.key, title: a.title, question: a.desc + '？' }));
+  // 让脚手架"真会动"：依据跨课轨迹把 select / integrate 锚点具体化（非恒定）
+  if (prev && typeof prev === 'object') {
+    const n = (prev.blindSpotCount | 0);
+    const m = Array.isArray(prev.entries) ? prev.entries.length : 0;
+    if (n > 0) {
+      const sel = out.find((x) => x.key === 'select');
+      if (sel) sel.question = '从你这课的保留与行动里，挑出最关键的 3 条——其中至少 1 条，来自你跨课反复卡住的点（共 ' + n + ' 条）？';
+    }
+    if (m > 1) {
+      const intg = out.find((x) => x.key === 'integrate');
+      if (intg) intg.question = '这一课和你最早一课（共跨 ' + m + ' 课）的哪条保留困惑能连起来？连一下？';
+    }
+  }
+  for (const p of out) noEval(p.question); // 零评价语铁律
+  return out;
+}
+
+// 跨课复习调度（路线数学：SM-2 间隔 + Ebbinghaus 遗忘曲线；只提示"该回看了"，不判掌握度）
+// 把"人类自己记下的保留困惑"按出现次数给间隔建议，到期就提示回看——纯调度，守人判契约。
+const REVIEW_EF0 = 2.5; // SM-2 初始易度因子（无人工评分则不调）
+function reviewItems(traj, now) {
+  const t = traj || { entries: [] };
+  const nowMs = (typeof now === 'number' && now > 0) ? now : Date.now();
+  const DAY = 86400000;
+  const byKey = {};
+  for (const e of (t.entries || [])) {
+    const at = Date.parse(e.at || '');
+    if (!(at > 0)) continue;
+    for (const raw of (e.blindSpots || [])) {
+      const k = String(raw || '').trim();
+      if (!k) continue;
+      if (!byKey[k]) byKey[k] = { text: k, seen: [] };
+      byKey[k].seen.push(at);
+    }
+  }
+  const out = [];
+  for (const k of Object.keys(byKey)) {
+    const seen = byKey[k].seen.slice().sort((a, b) => a - b);
+    const reps = seen.length;
+    const firstSeen = seen[0];
+    const lastSeen = seen[seen.length - 1];
+    // SM-2 间隔：I(1)=1, I(2)=6, I(n>2)=I(n-1)·EF
+    let intervalDays;
+    if (reps <= 1) intervalDays = 1;
+    else if (reps === 2) intervalDays = 6;
+    else intervalDays = 6 * Math.pow(REVIEW_EF0, reps - 2);
+    const dueAt = lastSeen + intervalDays * DAY;
+    const dueInDays = (dueAt - nowMs) / DAY;
+    out.push({
+      text: k,
+      firstSeen, lastSeen, reps,
+      intervalDays: Math.round(intervalDays * 10) / 10,
+      dueInDays: Math.round(dueInDays * 10) / 10,
+      due: dueAt <= nowMs,
+    });
+  }
+  // 到期优先；同状态按出现次数多者优先；再按最近出现早者优先
+  out.sort((a, b) => ((a.due === b.due) ? 0 : (a.due ? -1 : 1))
+    || (b.reps - a.reps) || (a.lastSeen - b.lastSeen));
+  return out;
+}
+function buildReviewSchedulePrompts(traj, now) {
+  const items = reviewItems(traj, now).filter((x) => x.due);
+  return items.map((x) => {
+    const q = '「' + snippet(x.text) + '」是你反复记下的保留困惑（跨 ' + x.reps
+      + ' 课）——按间隔复习，现在该回看一眼：它现在有进展了吗？';
+    if (!noEval(q)) throw new Error('复习调度提示泄漏评价语：' + q);
+    return { key: 'review', title: '该回看了', question: q };
+  });
+}
+
+// ---- 生成式总结·辅助计算（确定性本地启发式；只给候选/链接/度量，不替人定稿）----
+// 设计路线实现：Select=子模贪心×多样性挑 top-k；Organize=压缩比代理；Integrate=余弦近邻链接；
+// Extend=取历史中最不像本课的点作迁移靶。全部用 bag-of-words 余弦近似，无模型、无 API、可复现。
+// 诚实标注：这些是"辅助建议"，最终判定权永远在人（守人判契约）。
+const SUM_STOP = new Set(['的','了','是','在','我','你','他','她','它','我们','你们','他们','这','那','这个','那个','和','与','及','或','也','都','就','不','没','有','把','被','让','给','对','从','到','为','以','上','下','中','里','后','前','而','但','因为','所以','如果','一个','一种','怎么','什么','如何','为什','吗','呢','吧','啊','会','能','要','去','做','说','想','看','知道','觉得','应该','可以','这些','那些','自己','它们']);
+function sumTokenize(t) {
+  const s = String(t || '');
+  const out = [];
+  const re = /[A-Za-z0-9]+|[\u4e00-\u9fff]/g;
+  let m;
+  while ((m = re.exec(s))) {
+    const w = m[0].toLowerCase();
+    if (/[a-z0-9]/.test(w)) { if (w.length > 1) out.push(w); }
+    else if (!SUM_STOP.has(w)) out.push(w);
+  }
+  return out;
+}
+function sumBow(tokens) {
+  const m = {};
+  for (const t of tokens) m[t] = (m[t] || 0) + 1;
+  return m;
+}
+function sumCosine(a, b) {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  let dot = 0, na = 0, nb = 0;
+  for (const k of keys) {
+    const x = a[k] || 0, y = b[k] || 0;
+    dot += x * y; na += x * x; nb += y * y;
+  }
+  if (na === 0 || nb === 0) return 0;
+  return dot / (Math.sqrt(na) * Math.sqrt(nb));
+}
+// 子模贪心×多样性：每步选 信息量(不同 token 数) / (1 + 已选相似度之和) 最大者
+function summarySelect(items, k) {
+  const arr = (items || []).map((s) => String(s || '').trim()).filter(Boolean);
+  const uniq = [];
+  const seen = new Set();
+  for (const s of arr) { if (!seen.has(s)) { seen.add(s); uniq.push(s); } }
+  const kk = Math.max(1, Math.min(k || 3, uniq.length));
+  const chosen = [];
+  const chosenBow = [];
+  while (chosen.length < kk) {
+    let best = -1, bestScore = -1;
+    for (let i = 0; i < uniq.length; i++) {
+      if (chosen.includes(uniq[i])) continue;
+      const bow = sumBow(sumTokenize(uniq[i]));
+      const salience = Object.keys(bow).length;
+      let divPenalty = 0;
+      for (const cb of chosenBow) divPenalty += sumCosine(bow, cb);
+      const score = salience / (1 + divPenalty);
+      if (score > bestScore) { bestScore = score; best = i; }
+    }
+    if (best < 0) break;
+    chosen.push(uniq[best]);
+    chosenBow.push(sumBow(sumTokenize(uniq[best])));
+  }
+  return chosen.map((s) => {
+    const bow = sumBow(sumTokenize(s));
+    return { text: s, salience: Object.keys(bow).length };
+  });
+}
+// 压缩比代理：summary 相对 raw 的长度比（≤1；越短越凝练）
+function compressionRatio(raw, summary) {
+  const r = String(raw || '').length, s = String(summary || '').length;
+  if (r === 0) return s === 0 ? 1 : 1;
+  return Math.max(0, Math.min(1, s / r));
+}
+// 取跨课盲区文本集合
+function _trajBlindSpots(traj) {
+  const out = [];
+  for (const e of (traj && traj.entries || [])) {
+    for (const b of (e.blindSpots || [])) {
+      const t = String(b || '').trim();
+      if (t) out.push(t);
+    }
+  }
+  return out;
+}
+// Integrate：把 currentText 连到历史里最像的已有保留点（余弦近邻）
+function summaryIntegrate(currentText, traj) {
+  const cur = sumBow(sumTokenize(currentText));
+  if (Object.keys(cur).length === 0) return [];
+  const hist = _trajBlindSpots(traj);
+  return hist.map((t) => ({ text: t, similarity: Math.round(sumCosine(cur, sumBow(sumTokenize(t))) * 1000) / 1000 }))
+    .filter((x) => x.similarity > 0)
+    .sort((a, b) => b.similarity - a.similarity)
+    .slice(0, 2);
+}
+// Extend：取历史里最不像 currentText 的点作迁移靶（最小相似度 = 最远）
+function summaryExtend(currentText, traj) {
+  const cur = sumBow(sumTokenize(currentText));
+  if (Object.keys(cur).length === 0) return null;
+  const hist = _trajBlindSpots(traj);
+  let best = null, bestSim = 2;
+  for (const t of hist) {
+    const sim = sumCosine(cur, sumBow(sumTokenize(t)));
+    if (sim < bestSim) { bestSim = sim; best = t; }
+  }
+  if (!best) return null;
+  return { text: best, similarity: Math.round(bestSim * 1000) / 1000 };
+}
+function buildSummaryAssist(traj, currentText) {
+  const cur = (typeof currentText === 'string' && currentText.trim()) ? currentText : null;
+  const spots = _trajBlindSpots(traj);
+  const select = summarySelect(spots, 3);
+  const integrate = cur ? summaryIntegrate(cur, traj) : [];
+  const extend = cur ? summaryExtend(cur, traj) : null;
+  return { select, integrate, extend };
+}
+
 // ---- 导出（双模）----
 const API = {
   MIRROR_LABEL, FINAL_LABEL, MIRROR_BLOCKS, MIRROR_BLOCK_KEYS,
@@ -333,6 +579,16 @@ const API = {
   METACOG_ANCHORS, REVIEW_FOUR_STEPS,
   buildGuidedPrompts, buildMetacogPrompts, buildReviewPrompts,
   accumulateTrajectory,
+  // 抓主要矛盾 / 自我批评（方法增强）
+  buildMainContradictionPrompt, SELF_CRITIQUE_ANCHORS, buildSelfCritiquePrompts,
+  // 渐进试错 / 效果导向（方法增强）
+  buildTrialPrompts, TRIAL_ANCHORS, buildOutcomePrompts, OUTCOME_ANCHORS,
+  // 生成式总结（方法增强）
+  buildSummaryPrompts, SUMMARY_ANCHORS,
+  // 生成式总结·辅助计算（确定性本地启发式；只给候选/链接/度量，不替人定稿）
+  buildSummaryAssist, summarySelect, compressionRatio, summaryIntegrate, summaryExtend,
+  // 跨课复习调度（路线数学：SM-2 间隔 + 遗忘曲线）
+  reviewItems, buildReviewSchedulePrompts, REVIEW_EF0,
 };
 if (typeof module !== 'undefined' && module.exports) module.exports = API;
 if (typeof window !== 'undefined') window.LJReflection = API;
