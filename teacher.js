@@ -61,6 +61,8 @@ const bis = require('./bisim.js');      // 互模拟商：弱信号序列坍缩�
 const ref = require('./referent.js');    // 同指识别：N 个表达坍缩成 1 个被识别的东西（复合映射纤维/商，2026-09-25 落）
 const comp = require('./composite.js');  // 多层复合映射：N 轮合成一步 g=f_N∘…∘f_1（2026-09-25 落）
 const mbridge = require('./mapbridge.js'); // 大模型↔零权重模型桥：NL讲授→大模型抽映射→mapmodel诊断（2026-09-25 落）
+const yon = require('./yoneda.js');   // 米田引理：关系剖面=概念身份；照出"两个名字其实是同一个东西"（2026-09-25 落）
+const tsk = require('./tarski.js');   // Knaster–Tarski：不动点的定理保证 + 有限格上的迭代上界（2026-09-25 落）
 const fnc = require('./function.js');      // 函数思想算子（fn 已被 functor.js 占用）
 const reflection = require('./public/reflection.js');   // 双稿制确定性反思引擎（总结方法论解耦为独立模块）
 
@@ -1148,6 +1150,13 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
       if (analogy.note) teacherReportMd += `\n〔${analogy.note}〕`;
     }
 
+    // ── 逐轮触及的概念集合（拓扑共轭 与 Knaster–Tarski 链稳定性共用）──
+    //   提到外层声明：块级 const 跨块引用会 ReferenceError（本文件踩过一次真 bug，不再踩第二次）。
+    const studentRoundConcepts =
+      Array.isArray(concepts) && concepts.length && mineRounds.length
+        ? mineRounds.map((r) => concepts.filter((c) => r.text && r.text.indexOf(c) >= 0))
+        : null;
+
     // ── 不动点分析（Banach 压缩映射定理）：这面镜子的反射序列在收敛吗 ──
     //   Φ 的逐轮 W1 距离 = 相邻两轮反射态之间的距离；几何递减 ⇒ 序列 Cauchy ⇒ 收敛到不动点。
     if (transport && transport.series.length) {
@@ -1160,18 +1169,33 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
     //   共轭思想：两张“概念转移图”结构同构（仅重标号不同）⇒ 你重建出了作者本来的结构。
     //   数据派生：教材脉络 = 各 concept 在 lessonText 中首次出现的顺序；
     //            学生轨迹 = 每轮触及的 concept 集合，按轮次抽出有序轨迹。
-    if (Array.isArray(concepts) && concepts.length && mineRounds.length) {
+    if (studentRoundConcepts && concepts.length) {
       const lessonCanonical = concepts
         .map((c) => ({ c, i: lessonText.indexOf(c) }))
         .filter((o) => o.i >= 0)
         .sort((a, b) => a.i - b.i)
         .map((o) => o.c);
-      const studentRoundConcepts = mineRounds.map((r) =>
-        concepts.filter((c) => r.text && r.text.indexOf(c) >= 0));
       const cj = conj.analyzeConjugacy(studentRoundConcepts, lessonCanonical);
       if (cj.ok) {
         teacherReportMd += '\n\n## 你的讲法，和作者本来的骨架对得上吗（拓扑共轭）\n' + cj.line + '\n';
         if (cj.note) teacherReportMd += `〔${cj.note}〕\n`;
+      }
+    }
+
+    // ── Knaster–Tarski：不动点不是"看着不再变了"，而是有定理保证 ──
+    //   与上面 Banach 那条的区别：Banach 走【度量+收缩比】（连续量，阈值是启发式的）；
+    //   这条走【离散格】：逐轮讲到的概念集合一旦成单调链，有限格的链长上界就给出
+    //   "还要几轮必然停下"的精确保证，不需要拍阈值、不需要"再讲几轮看看"。
+    if (studentRoundConcepts && studentRoundConcepts.length >= 2) {
+      const cs = tsk.chainStability(studentRoundConcepts, concepts);
+      if (cs.monotone !== 'none' || cs.stable) {
+        teacherReportMd += '\n\n## 你还要讲几轮才停得下来（Knaster–Tarski 不动点）\n' + cs.line + '\n';
+        teacherReportMd += `〔Knaster–Tarski（Tarski 1955）：完备格上的单调映射必有最小不动点，` +
+          `且不动点集本身仍是完备格。这里格 = 概念的幂集 ${concepts.length} 个元素，` +
+          `严格单调链的长度上界就是它——` +
+          (cs.remainingBound == null
+            ? '本例不成单调链，上界无从给出（诚实：不编）。〕\n'
+            : `剩余上界 ${cs.remainingBound} 轮。〕\n`);
       }
     }
 
@@ -1276,6 +1300,25 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
           if (!bs.deadEnds.length && !bs.orphans.length && !bs.cycles.length && bs.gapPairs === 0)
             line += '· 这张网暂时没有断头、没有孤源、没有环、没有缝隙——结构是自洽的。\n';
           teacherReportMd += '\n\n## 你讲的概念，连成了一张映射网（断头/孤源/环/缝隙）\n' + line;
+
+          // ── 米田引理：你讲的这些名字，有的其实是同一个东西 ──
+          //   依据：米田嵌入 y: A ↦ Hom(-,A) 全忠实 ⇒ 关系剖面相同者在图里不可区分。
+          //   只报"分不开"，不判对错、不评分（守 A2）；approximate=true 由模块自带，不自称同构证明。
+          const yind = yon.indistinguishable(mb.model);
+          if (yind.groups.length) {
+            teacherReportMd += '\n\n## 你讲的两个名字，可能其实是同一个东西（米田引理）\n'
+              + yind.line + '\n〔' + yind.note + '〕\n';
+          }
+
+          // ── Knaster–Tarski：这张网上"走到底"的那一步，是最小不动点 ──
+          //   传播算子 F(X)=X∪out(X) 在幂集格（有限完备格）上单调 ⇒ 最小不动点存在，
+          //   Kleene 迭代 ⊔ₙ Fⁿ(⊥) 把它造出来，且迭代次数有精确上界（不需要轮询到"看着不再变"）。
+          const seeds = bs.orphans.length ? bs.orphans : mb.model.concepts().slice(0, 1);
+          const fp = tsk.reachFixpoint(mb.model, seeds);
+          if (fp.ok) {
+            teacherReportMd += '\n\n## 沿着你教的映射一直走，会停在哪（最小不动点）\n'
+              + fp.line + '\n〔' + fp.note + '〕\n';
+          }
         }
       } catch (_) { /* 抽映射失败不影响主线，静默跳过 */ }
     }
