@@ -62,6 +62,7 @@ const ref = require('./referent.js');    // 同指识别：N 个表达坍缩成 
 const comp = require('./composite.js');  // 多层复合映射：N 轮合成一步 g=f_N∘…∘f_1（2026-09-25 落）
 const mbridge = require('./mapbridge.js'); // 大模型↔零权重模型桥：NL讲授→大模型抽映射→mapmodel诊断（2026-09-25 落）
 const yon = require('./yoneda.js');   // 米田引理：关系剖面=概念身份；照出"两个名字其实是同一个东西"（2026-09-25 落）
+const tfn = require('./teachingfn.js'); // 讲授作为函数：可逆性/跨时段/有界性/三种表示（复用 function.js 的 invertibility + funext，2026-09-26 落）
 const tsk = require('./tarski.js');   // Knaster–Tarski：不动点的定理保证 + 有限格上的迭代上界（2026-09-25 落）
 const fnc = require('./function.js');      // 函数思想算子（fn 已被 functor.js 占用）
 const reflection = require('./public/reflection.js');   // 双稿制确定性反思引擎（总结方法论解耦为独立模块）
@@ -1326,9 +1327,13 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
     // ── 函数思想（大学数学第2节）：单值性 / 覆盖 / 意象vs定义 ──
     //   文献支撑：Vinner & Dreyfus 1989（意象≠定义）；Evangelidou et al. 2004（把函数讲窄成一一对应
     //   是记录在案的经典误解）；funext 外延相等；函数=全+单值、反函数⟺双射。
-    //   ⚠️ 只接"数据干净"的三个算子：单值性(原话→概念)、覆盖(值域/对应域)、意象vs定义(教材定义 vs 你举的例子)。
-    //      外延相等 与 可逆性 需要一个干净的【概念→概念】函数对象，当前 mapbridge 产出的是多值关系
-    //      （一概念可有多条出边），不是函数——硬套会失真，故已实现并测过，暂不接线，不臆造。
+    //   ⚠️ 单值性(原话→概念)、覆盖(值域/对应域)、意象vs定义(教材定义 vs 你举的例子) 直接接在这里。
+    //      外延相等 与 可逆性 需要干净的【输入→输出】函数对象，而 mapbridge 产出的是多值关系
+    //      （一概念可有多条出边），不是函数——所以它们改由 teachingfn.js 接：
+    //      那里用【探测→你的回答】构造真函数（每个探测点对应一次回答），是唯一不失真的地方。
+    // 定义与例子宽窄是否冲突——三种表示段要用它决定"要不要提示补表格"，
+    //   故提到外层（块级 const 跨块引用会 ReferenceError，本文件踩过两次）。
+    let defExampleConflict = false;
     if (mineRounds.length && Array.isArray(concepts) && concepts.length) {
       try {
         // ① 单值性：一话多指 ⇒ 非良定义（是关系不是函数）⇒ 真歧义
@@ -1350,11 +1355,61 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
         // ⑤ 意象 vs 定义：教材定义 vs 你举的例子，口径是否等宽（只报错位，不错位就不出声）
         const ivd = fnc.imageVsDefinition(lessonText || '', mineRounds.map((r) => r.text || ''));
         if (ivd.ok && (ivd.narrowed || ivd.widened)) {
+          defExampleConflict = true;
           teacherReportMd += '\n\n## 你的例子和你的定义，是同一个宽窄吗（意象 vs 定义）\n' + ivd.line + '\n';
           if (ivd.note) teacherReportMd += `〔${ivd.note}〕\n`;
         }
       } catch (_) { /* 不影响主线 */ }
     }
+
+    // ── 函数思想（续一）：讲授本身就是一个函数 f：概念 ↦ 你的回答 ──
+    //   这一簇是 function.js 里 invertibility（反函数）与 extensionalEquality（funext）
+    //   唯一能【诚实接线】的地方：它们需要一个干净的输入→输出函数对象，而
+    //   mapbridge 的"概念→概念"是多值关系（一条概念可有多条出边），硬套会失真；
+    //   问答对则是真函数——每个探测点对应一次回答。
+    //   ⚠️ 口径：只判单射（⟺左逆存在 ⇒ 能唯一反推），不判满射、不称双射——
+    //      本构造下没有自然的对应域，用值域反推会让满射恒真（那是假结论）。
+    if (Array.isArray(probes) && probes.length && Array.isArray(concepts) && concepts.length) {
+      try {
+        const af = tfn.buildAnswerFunction(probes, concepts);
+        if (af.ok) {
+          teacherReportMd += '\n\n## 听你答案的人，能反推出他该问什么吗（可逆性）\n' + af.line + '\n';
+          if (af.note) teacherReportMd += `〔${af.note}〕\n`;
+        }
+        const sh = tfn.answerFunctionShift(probes, concepts);
+        if (sh.ok) {
+          teacherReportMd += '\n\n## 你前后半堂，是同一个讲法吗（外延相等）\n' + sh.line + '\n';
+        }
+      } catch (_) { /* 不影响主线 */ }
+    }
+
+    // ── 函数思想（续二）：有界性 —— 你讲清"到什么份上就不算数"了吗 ──
+    //   函数有界 = 存在上下界；迁移到讲授 = 你是否为这个概念划出了成立范围。
+    //   两条证据都是【计数】：边界型探针问答数 + 你话里的边界表述。不评分（守 A2）。
+    if (Array.isArray(concepts) && concepts.length) {
+      try {
+        const bd = tfn.boundedness({ concepts, rounds: mineRounds, probes });
+        if (bd.ok) {
+          teacherReportMd += '\n\n## 你讲清"到什么份上就不算数"了吗（有界性）\n' + bd.line + '\n';
+          if (bd.note) teacherReportMd += `〔${bd.note}〕\n`;
+        }
+      } catch (_) { /* 不影响主线 */ }
+    }
+
+    // ── 函数思想（续三）：三种表示互校 —— 解析式 / 图像 / 表格 ──
+    //   函数独有（映射不强调三种表示）。缺"表格"这个仲裁者时，定义与例子一旦冲突
+    //   （Vinner & Dreyfus：意象 ≠ 定义）就没有能裁决的东西。只在【真的缺】时出声。
+    try {
+      const rep = tfn.representations({
+        definitionText: lessonText || '',
+        rounds: mineRounds,
+        conflict: defExampleConflict,
+      });
+      if (rep.ok && rep.missing.length) {
+        teacherReportMd += '\n\n## 同一个东西，你用了几种表示（解析式/图像/表格）\n' + rep.line + '\n';
+        if (rep.note) teacherReportMd += `〔${rep.note}〕\n`;
+      }
+    } catch (_) { /* 不影响主线 */ }
 
     // —— 作品：学生（镜子）共同的《课堂纪要》落盘 ——
     let minutes = { md: '', by: '', path: '', error: '' };

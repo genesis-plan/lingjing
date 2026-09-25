@@ -53,7 +53,9 @@ if (r) {
   // 红线判的是"有没有真的产出分数"，而报告里满是「非掌握度」「不评分」这类
   // 【否定式声明】——那是在声明自己不评分，恰恰是守红线的证据。故先剥否定式，
   // 只判【肯定式】出现。真要是产出了分数，必然是肯定式表述，跑不掉。
-  const stripped = md.replace(/(不|非|无|未|没有|拒绝)(掌握度|得分|评分|正确率|熟练度)/g, '');
+  // 否定式要认全：不评分 / 不是评分 / 不给评分 / 非掌握度 ……（这个坑踩过三次，
+  // 否定词与目标词之间会夹"是/给/产/算"，必须留中间位，否则把守红线的声明判成违规）
+  const stripped = md.replace(/(不|非|无|未|没有|拒绝)(是|给|产|算)?(掌握度|得分|评分|正确率|熟练度)/g, '');
   const hit = ['掌握度', '得分', '评分', '正确率', '熟练度'].find((w) => stripped.includes(w));
   check('⑥ 红线：整份报告不产出掌握度/得分/评分', !hit);
   if (hit) {                                    // 失败时把上下文打出来，别让人猜
@@ -85,6 +87,25 @@ if (r) {
   console.log(`    · 实况：抽出 ${mb.maps.length} 条映射，米田同形组 ${yind.groups.length} 组` +
     `${yind.groups.length ? '（' + yind.groups.map((g) => g.join('/')).join('，') + '）' : ''}，` +
     `不动点 ${fp.iterations} 步 / 上界 ${fp.bound} 步，闭包 ${fp.closure.length} 个概念`);
+  // ── ⑧ 接线契约：teachingfn 用【真实 probes 形状】跑一遍 ──
+  //   报告里这几段依赖 probes 的真实字段（round/ci/type/answer）；形状一变就哑，
+  //   而端到端未必触发 ⇒ 照真实形状钉住调用不抛、返回结构对。
+  {
+    const tfn = (await import('../teachingfn.js')).default;
+    const probes = [
+      { round: 1, ci: 0, type: 'example', say: '问1', answer: '映射是单值对应' },
+      { round: 1, ci: 1, type: 'example', say: '问2', answer: '函数是数集上的映射' },
+      { round: 3, ci: 0, type: 'example', say: '问3', answer: '映射是单值对应' },
+    ];
+    const cs = ['映射', '函数'];
+    const af = tfn.buildAnswerFunction(probes, cs);
+    check('⑧ 接线：buildAnswerFunction 用真实 probes 形状可跑', af.ok === true);
+    check('⑧ 接线：本例无坍缩（两个要点答得不同）', af.injective === true);
+    const bd = tfn.boundedness({ concepts: cs, rounds: [{ round: 1, text: '映射不算多值对应。' }], probes });
+    check('⑧ 接线：boundedness 用真实 rounds/probes 形状可跑', bd.ok === true);
+    const rep = tfn.representations({ definitionText: '函数是数集上的映射', rounds: [{ round: 1, text: '比如 x²。' }], conflict: false });
+    check('⑧ 接线：representations 可跑且点名缺表格', rep.ok === true && rep.missing.some((m) => m.includes('表格')));
+  }
 }
 
 // 清理落盘的会话文件（验证产物，不留垃圾）
