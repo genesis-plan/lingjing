@@ -60,6 +60,7 @@ const fn = require('./functor.js');     // 函子自然性自检：镜面在没�
 const bis = require('./bisim.js');      // 互模拟商：弱信号序列坍缩成根误类（2026-09-25 落）
 const ref = require('./referent.js');    // 同指识别：N 个表达坍缩成 1 个被识别的东西（复合映射纤维/商，2026-09-25 落）
 const comp = require('./composite.js');  // 多层复合映射：N 轮合成一步 g=f_N∘…∘f_1（2026-09-25 落）
+const mbridge = require('./mapbridge.js'); // 大模型↔零权重模型桥：NL讲授→大模型抽映射→mapmodel诊断（2026-09-25 落）
 const reflection = require('./public/reflection.js');   // 双稿制确定性反思引擎（总结方法论解耦为独立模块）
 
 const llm = require('./llm.js');   // LLM 传输层已抽离为独立连接器（见 llm.js）
@@ -1150,7 +1151,7 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
     //   Φ 的逐轮 W1 距离 = 相邻两轮反射态之间的距离；几何递减 ⇒ 序列 Cauchy ⇒ 收敛到不动点。
     if (transport && transport.series.length) {
       const cv = cvg.analyzeConvergence(transport.series);
-      teacherReportMd += '\n\n## 你的理解在收敛吗（不动点）\n' + cv.line + '\n';
+      teacherReportMd += '\n\n## 这面镜子照出：你的讲授在自洽收拢吗（不动点）\n' + cv.line + '\n';
       if (cv.note) teacherReportMd += `〔${cv.note}〕\n`;
     }
 
@@ -1168,7 +1169,7 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
         concepts.filter((c) => r.text && r.text.indexOf(c) >= 0));
       const cj = conj.analyzeConjugacy(studentRoundConcepts, lessonCanonical);
       if (cj.ok) {
-        teacherReportMd += '\n\n## 你走过的图和教材是同一张吗（拓扑共轭）\n' + cj.line + '\n';
+        teacherReportMd += '\n\n## 你的讲法，和作者本来的骨架对得上吗（拓扑共轭）\n' + cj.line + '\n';
         if (cj.note) teacherReportMd += `〔${cj.note}〕\n`;
       }
     }
@@ -1245,6 +1246,32 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
         teacherReportMd += '\n\n## 你 N 轮合起来，是一步什么映射（多层复合映射）\n' + cp.line + '\n';
         if (cp.note) teacherReportMd += `〔${cp.note}〕\n`;
       }
+    }
+
+    // ── 概念映射网（大模型抽映射 + 零权重模型诊断）：这面镜子把你讲的"概念→概念"织成一张图 ──
+    //   用户拍板（2026-09-25 夜）：权重无关引擎做推理内核，大模型只在"需要自然语言理解的地方"接入。
+    //   本段即具象点：人类自然语言讲授 → 大模型抽出映射 → mapmodel 零权重照出断头/环/缝隙（盲区）。
+    if (mineRounds.length && Array.isArray(concepts) && concepts.length) {
+      try {
+        const taught = mineRounds.map((r) => r.text || '').join('\n');
+        const mb = await mbridge.buildModelFromTeaching(taught, { concepts, deadline: 12000 });
+        if (mb.maps.length) {
+          let line = `你这堂课讲出来的概念，被连成了一张映射网（共 ${mb.maps.length} 条映射，`
+            + `大模型抽取=${mb.usedLLM ? '是' : '否（无 key，回退到词面）'}）：\n`;
+          const bs = mb.blindSpots;
+          if (bs.deadEnds.length)
+            line += `· 断头路（讲了但没再延伸的概念）：${bs.deadEnds.join('、')}——这些可能就是你的盲区。\n`;
+          if (bs.orphans.length)
+            line += `· 孤源（只被别人提到、自己从没被当作起点）：${bs.orphans.join('、')}。\n`;
+          if (bs.cycles.length)
+            line += `· 绕圈（概念映射绕回自己）：${bs.cycles.length} 处，净效果≈空转。\n`;
+          if (bs.gapPairs > 0)
+            line += `· 结构缝隙：有 ${bs.gapPairs} 对概念在网中互不连通，可能漏了连接。\n`;
+          if (!bs.deadEnds.length && !bs.orphans.length && !bs.cycles.length && bs.gapPairs === 0)
+            line += '· 这张网暂时没有断头、没有孤源、没有环、没有缝隙——结构是自洽的。\n';
+          teacherReportMd += '\n\n## 你讲的概念，连成了一张映射网（断头/孤源/环/缝隙）\n' + line;
+        }
+      } catch (_) { /* 抽映射失败不影响主线，静默跳过 */ }
     }
 
     // —— 作品：学生（镜子）共同的《课堂纪要》落盘 ——
