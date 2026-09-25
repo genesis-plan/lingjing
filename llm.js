@@ -51,9 +51,21 @@ const PROVIDERS = {
     keyEnv: 'LINGJING_ZHIPU_KEY',
     key: process.env.LINGJING_ZHIPU_KEY || '',
     base: process.env.LINGJING_ZHIPU_BASE || 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
-    models: [process.env.LINGJING_ZHIPU_MODEL || 'glm-4.7-flash'],
+    // ⚠️ 2026-09-25 晚高峰实测：glm-4.7-flash 免费档限流严重（HTTP 429 "账户已达到速率限制"），
+    //   同一账户 glm-4.5-flash 即通。改成**降级链**（同 OpenRouter 模式，orChat 挨个试到非空为止）：
+    //   两个都是推理模型，extraBody 的 thinking 开关对两者都合法。
+    models: (process.env.LINGJING_ZHIPU_MODEL
+      ? [process.env.LINGJING_ZHIPU_MODEL]
+      : ['glm-4.7-flash', 'glm-4.5-flash']),
     concurrency: 1, // 免费档 1 并发：串行化避免 429
     kind: 'openai',
+    // ⚠️ 2026-09-25 实测定案的坑：glm-4.7-flash 是**推理模型**（先思考后作答），
+    //   oneCall 默认 max_tokens=140 全部烧在 reasoning_content，content 恒为空 →
+    //   课堂学生回话永远静默回退到兜底语料，LLM 形同虚设（而 llmStatus 还显示 usable，极具迷惑性）。
+    //   修法：① 官方 thinking 参数关闭思考 → content 直出、token 够用、响应更快（课堂回话不需要深度推理）；
+    //         ② defaultMaxTokens 提高，即使上游忽略 thinking 参数也有余量写答案（oneCall 已有 reasoning_content 回退）。
+    extraBody: { thinking: { type: 'disabled' } },
+    defaultMaxTokens: 512,
   },
   deepseek: {
     label: 'DeepSeek',
@@ -150,6 +162,10 @@ async function sfChat(fn, system, user, opts = {}) {
   }
   // 硅基流动无 key / 返回空 → 国外免费模型兜底（仍全免费）
   if (!txt) txt = await orFreeChat(system, user, opts);
+  // 仍空 → 当前 ACTIVE 提供商（如智谱免费档）顶上（2026-09-25 补）：
+  //   实测教训——环境只有 ZHIPU_API_KEY、没有 SF/OR key 时，课堂镜子两级回退全部空转，
+  //   兜底语料接管，而 llmStatus 还报 usable=true，极具迷惑性。镜子不应因单一渠道缺 key 而全哑。
+  if (!txt) txt = await orChat(system, user, opts);
   if (txt) llmVerified = true;
   return txt;
 }
@@ -315,7 +331,9 @@ if (!OR_FREE._limit) OR_FREE._limit = PROVIDERS.openrouter._limit;
 
 // ---- 单次调用（OpenAI 兼容 chat/completions）----
 function oneCall(p, model, system, user, opts = {}, tried = false) {
-  const { timeoutMs = 12000, maxTokens = 140, temperature = 0.85 } = opts;
+  const { timeoutMs = 12000, temperature = 0.85 } = opts;
+  // maxTokens 解析顺序：调用方显式指定 > 提供商默认（推理模型需要更大预算）> 全局默认 140
+  const maxTokens = opts.maxTokens || p.defaultMaxTokens || 140;
   // 允许调用方自带 messages（多模态 vision：text + image_url）
   const messages = opts.messages || [
     { role: 'system', content: system },
@@ -326,6 +344,7 @@ function oneCall(p, model, system, user, opts = {}, tried = false) {
     messages,
     max_tokens: maxTokens,
     temperature,
+    ...(p.extraBody || {}),   // 提供商专属参数（如智谱 thinking 开关），通用透传机制
   });
   const target = parseTarget(p.base);
   return new Promise((resolve) => {
@@ -365,9 +384,9 @@ function oneCall(p, model, system, user, opts = {}, tried = false) {
             }
             // ② 鉴权失败 → 熔断 10 分钟
             if (code === 401) { markDead(600000, `${p.label} 密钥无效`); resolve(''); return; }
-            // ③ 上游 429/403（共享池忙/并发超限）→ 同模型再试一次，仍失败则交给降级链
+            // ③ 上游 429/403（共享池忙/并发超限）→ 同模型再试一次（429 退避 2s——智谱免费档"访问量过大"高频，900ms 常撞同一波高峰），仍失败则交给降级链
             if (!tried && (code === 429 || code === 403)) {
-              setTimeout(() => oneCall(p, model, system, user, opts, true).then(resolve), 900);
+              setTimeout(() => oneCall(p, model, system, user, opts, true).then(resolve), code === 429 ? 2000 : 900);
               return;
             }
             resolve(''); return;

@@ -51,6 +51,9 @@
   .feed { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:12px; margin-bottom:14px; min-height:60px; max-height:280px; overflow:auto; }
   .bub { margin:6px 0; padding:8px 12px; border-radius:12px; background:#f4f5fb; font-size:14px; animation:pop .3s ease; }
   .bub b { color:var(--brand); }
+  /* 体验节奏：镜子"接住你说的话"那一拍——比提问更轻，一眼看出这一拍不问 */
+  .bub.ref { background:#fbfaff; border-left:3px solid #d8d5f5; color:#5b5580; font-size:13px; }
+  .bub.ref b { color:#8b85b8; font-weight:600; }
   @keyframes pop { from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:none;} }
   .metrics { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:12px; }
   .metric { background:var(--brand-soft); border-radius:10px; padding:10px; text-align:center; }
@@ -175,6 +178,16 @@
       const f = document.createElement('div'); f.className='bub'; f.style.background='#eef0ff';
       f.innerHTML = '<b>第 ' + ev.round + ' 轮</b> · 学生开始听讲…'; $('feed').appendChild(f);
       $('rnd').textContent = ev.round;
+      return;
+    }
+    // 体验节奏（2026-09-25）：不是每一拍都提问。
+    //   reflect = 镜子只接住先生刚说的话、不追问——这一拍视觉上要**比提问更轻**：
+    //   淡一点、小一点、不带"提问中"标记。若它和提问长得一样，呼吸就白做了。
+    if (ev.type === 'reflect'){
+      const f = document.createElement('div'); f.className = 'bub ref';
+      f.innerHTML = '<b>' + ev.name + '</b>：' + esc(ev.text || '');
+      $('feed').appendChild(f); $('feed').scrollTop = $('feed').scrollHeight;
+      document.querySelectorAll('.st').forEach(s => { if(s.textContent==='提问中'){ s.className='st listen'; s.textContent='听讲中'; }});
       return;
     }
     // （understand 事件已删除：它带的是学生自评理解度 R 的假数，服务端不再发）

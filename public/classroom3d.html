@@ -26,6 +26,8 @@
     opacity:0; transition:opacity .25s; white-space:pre-wrap; }
   .bub.show { opacity:1; }
   .bub b { color:var(--brand); }
+  /* 体验节奏："镜子只接住、不追问"那一拍——比提问轻，一眼看出这一拍不问 */
+  .bub.quiet { background:rgba(250,250,252,.9); color:#57536e; font-weight:600; border:1px solid #e6e2f7; }
   #cbub { left:50%; top:84px; transform:translate(-50%,-100%); max-width:320px; font-weight:700; background:rgba(79,70,229,.92); color:#fff; }
   /* 课堂状态（轮次 / 真 LLM 学生数）——取代原文字面板的状态展示 */
   #status { top:76px; left:50%; transform:translateX(-50%); font-size:12px; color:#e8d9b5;
@@ -757,12 +759,14 @@ const PROBE_LABEL = { counter:'反例', bound:'边界', example:'正例', distin
 const bubbleEls = {};
 // 气泡只显示学生说的话。名字/探测标签/前概念是内部信息，不在体验层出现——
 // 哪个立绘发光、头顶冒泡，自然标识了说话者（见 bubbleEls 投影定位）。
-function showBubble(name, text){
+// quiet=true：体验节奏里"镜子只接住、不追问"那一拍——淡一点、停久一点
+function showBubble(name, text, quiet){
   let el = bubbleEls[name];
   if(!el){ el=document.createElement('div'); el.className='bub'; $('bubbles').appendChild(el); bubbleEls[name]=el; }
   el.innerHTML = escapeHtml(text || '（未发言）');
   el.classList.add('show');
-  clearTimeout(el._t); el._t = setTimeout(()=>{ el.classList.remove('show'); }, 6800);
+  if(quiet) el.classList.add('quiet');
+  clearTimeout(el._t); el._t = setTimeout(()=>{ el.classList.remove('show','quiet'); }, quiet?9000:6800);
 }
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
 
@@ -1057,6 +1061,12 @@ function handleEvent(ev){
   // ⚠️ 2026-09-11：服务器不再发 `understand` 事件（那个事件带的是 R，假数，事件本身已删）。
   //   现在发的是 `probe`：他准备开口抛一枚探测。姿态只按**行为**给（在思考），不带任何"程度"。
   if(ev.type==='probe'){ setStatus(ev.name,'think'); setAct(ev.name, 0.6); return; }
+  // 体验节奏：不是每一拍都提问。reflect = 镜子只接住先生刚说的话、不追问。
+  //   不进 transcript（不做成回顾题），气泡停得久一点——这一拍要被看见。
+  if(ev.type==='reflect'){
+    pulseSpeak(ev.name); showBubble(ev.name, ev.text, true);
+    return;
+  }
   if(ev.type==='ask'){
     const a=avatars.find(v=>v.userData.name===ev.name);
     setStatus(ev.name,'ask'); setAct(ev.name, 0.95); pulseSpeak(ev.name);

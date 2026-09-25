@@ -109,6 +109,157 @@ function inferResponseMode(text) {
   return 'partial';
 }
 
+// =====================================================================
+// 认知负荷约束 + 最优停时判据（2026-09-25 落码，守"不靠模型猜"铁律）
+// -------------------------------------------------------------------
+// ① 单轮单概念：研究显示「由模型发起的任务切换」是绩效下降的最强预测因子，
+//    其影响约为内在认知负荷的 3 倍。故本引擎强制：一次探测只盯一个概念，
+//    若 target 与当前 focus 不同，强制退回最安全的澄清层并显式标记换题。
+// ② 最优停时：追问"问几轮停"不问设计师拍脑袋，而按
+//        τ* = argmax_n E[ I_n − c·n ]       （I_n=本轮新信息，c=打断成本）
+//    的停时结构判定——每轮只问一句"下一轮的新信息还值不值这个打断成本"。
+//    注意：I_n 用**新词比例的代理度量**近似（确定性、零 LLM、可单测），
+//    它不是真实互信息；真实信息增益需要人的真值，而 A2 禁止表示掌握概率。
+//    故此处口径为"尽力而为的确定性代理"，不是最优停时的严格实现。
+// =====================================================================
+
+// 确定性分词（不引入任何分段器依赖）
+function tokenize(text) {
+  if (!text) return [];
+  return String(text.toLowerCase())
+    .split(/[^0-9a-z一-龥]+/i)
+    .filter((t) => t.length > 1);
+}
+
+// 本轮新信息增益的**代理度量**：本轮相对上一轮的新词占比 ∈ [0,1]
+// 字符 n-gram（默认 2-gram）：中文没有空格，"同义反复"的字面片段切分会随标点/虚词浮动，
+// 用整词切分会把"和刚才一样，是植物用阳光、水和二氧化碳…"算成和上一轮完全不同 → 假增益 ≈1。
+// 字符 2-gram 对这种浮动稳得多（重叠片段照旧重叠）。
+function charNgrams(text, n = 2) {
+  const s = String(text || '').replace(/\s+/g, '').toLowerCase();
+  const out = new Set();
+  if (!s) return out;
+  if (s.length < n) { out.add(s); return out; }
+  for (let i = 0; i <= s.length - n; i++) out.add(s.slice(i, i + n));
+  return out;
+}
+
+function estimateGain({ utterance = '', prevUtterance = '' } = {}) {
+  if (!String(utterance || '').trim()) return 0;
+  const cur = charNgrams(utterance);
+  if (!cur.size) return 0;
+  if (!String(prevUtterance || '').trim()) return 1; // 首轮：已知有信息
+  const prev = charNgrams(prevUtterance);
+  let fresh = 0;
+  cur.forEach((t) => { if (!prev.has(t)) fresh++; });
+  return fresh / cur.size;
+}
+
+// 最优停时判据：此刻是否仍值得继续追问
+//   gain > cost → 净收益为正，继续；gain ≤ cost → 停；round ≥ maxRounds → 停（预算）
+function shouldContinue({ round = 1, gain = 0, cost = 0.35, maxRounds = 8 } = {}) {
+  if (round >= maxRounds) return { stop: true, reason: 'budget-exhausted', gain, cost };
+  if (gain <= cost)   return { stop: true, reason: 'gain-below-cost', gain, cost };
+  return { stop: false, reason: 'positive-net', gain, cost };
+}
+
+// 单轮单概念约束：换题即退回安全层，并把换题这件事显式暴露（可被 UI 与测试看见）
+function enforceSingleFocus(spec, focus = null) {
+  if (!focus) return { ...spec, focusShifted: false, focusedOn: spec.target };
+  const focusedOn = focus;
+  const focusShifted = spec.target !== focus;
+  if (!focusShifted) return { ...spec, focusShifted: false, focusedOn };
+  // 换题 → 强制澄清层，并给出换题理由（不静默跳概念）
+  const safe = PROGRESSION.clarify;
+  return {
+    ...spec,
+    target: focus,
+    progressionKey: 'clarify',
+    progressionLevel: safe.level,
+    progressionCue: safe.cue,
+    focusShifted: true,
+    focusReason: `上轮还停在「${spec.target}」，本轮改问「${focus}」——按认知负荷约束，一次只追一个概念，故退回最安全的澄清层。`,
+    focusedOn,
+  };
+}
+
+// =====================================================================
+// 期望信息增益（EIG）选问：挑"答与不答各一半"的那枚问题
+// -------------------------------------------------------------------
+// 原理（arXiv 2510.20886「Shoot First, Ask Questions Later」的闭式）：
+//      一个人对某个问题的答案是**带噪信道**，噪声率记 ε（他可能答偏、答空、答非所问）。
+//      设 p_t = 先验"他这次会顺着答"的概率，则问 q 能消除的不确定性是
+//          EIG(q) = H_b( ε + (1−2ε)·p_t ) − H_b( ε )
+//      其中 H_b 是二元熵。展开看：p_t = 0.5 时 EIG 最大（这枚问题一半一半，删掉的分支最多），
+//      p_t → 1（他必然答）或 p_t → 0（他必然不答）时 EIG 都趋于 0——那就是枚没信息量的废问。
+//   直觉对照：问"这个词什么意思"＝他必定答，听完了，但你没消除任何分支；
+//             问"你默认了什么前提"＝他可能说也可能不说，一说你就砍掉一大片。所以后者更值。
+//
+// ⚠️ A2 兼容性（这条必须钉死）：p_t 与 ε 都是**写死在代码里的常量先验**，
+//    不是从人类表现里估出来的。本引擎不表示掌握概率、不给人打分——
+//    EIG 说的是"这一枚问句自身有多可能产生信息"，跟回答者的好坏无关。
+//    想改先验就直接改下面的常量表，全部可审计、可单测。
+//
+// 与旧实现的差别：旧 probeKind() 是**轮转调度**（第几轮抛哪一类写死），问什么跟问得值不值无关；
+//   EIG 是**信息调度**：每一轮从该问的类型里挑 EIG 最高的那枚。
+// =====================================================================
+
+// 通道噪声率 ε：答案可能含糊/答偏/跑题（认知研究里"解释性错觉 IOED"——人会答得比自己以为的更泛）
+const CHANNEL_NOISE = 0.15;
+
+// 先验 p_t：问这一类问题时，"对方会顺着答"的概率。
+//   数值来自提问设计的常识标定（不是实测拟合），改这里就必须重跑 test_eig.mjs。
+const PRIOR_ANSWERS = {
+  distinct:     0.90, // "这两个说法差在哪" —— 人几乎一定会解释
+  example:      0.85, // "给我个例子" —— 人几乎一定会举
+  mechanism:    0.80, // "为什么会这样" —— 多半会讲
+  bound:        0.55, // "什么情况下不成立" —— 有时答、有时绕
+  apply:        0.55, // "换成别的还成立吗" —— 同上
+  counter:      0.40, // "有没有反例" —— 经常举不出来，举不出来本身就是信息
+  hypothesis:   0.50, // 边界假设
+  land:         0.70, // 薄教案：把原话举起来逼落地，多半会补具体事例
+};
+
+// 二元熵 H_b(p)，p∈[0,1]
+function bernoulliEntropy(p) {
+  const x = Math.min(1, Math.max(0, Number(p) || 0));
+  if (x <= 0 || x >= 1) return 0;
+  return -(x * Math.log2(x) + (1 - x) * Math.log2(1 - x));
+}
+
+// EIG = H_b(ε + (1−2ε)·p_t) − H_b(ε)
+function eigOf(probeType, noise = CHANNEL_NOISE) {
+  const pt = PRIOR_ANSWERS[probeType];
+  if (pt == null) return 0;                       // 未登记类型 → 不参与优选（保守）
+  const eps = Math.min(0.49, Math.max(0, noise));
+  return bernoulliEntropy(eps + (1 - 2 * eps) * pt) - bernoulliEntropy(eps);
+}
+
+// 上一轮问过的类型 × 本次人类答得怎么样 → 本轮这一类的实际 EIG
+//   responseMode='fluent'：他在这个方向上已经讲透了，再问剩余不确定性本来就少 → 打折
+//   responseMode='stuck' ：他卡住了，多半是这枚问得太深 → 也打折（不硬顶）
+//   repeatStreak：连续问过同一类的次数，越多越要打折（避免连着三问都在同一个方向上打转）
+function adjustedEig({ probeType, responseMode = null, repeatStreak = 0, noise = CHANNEL_NOISE } = {}) {
+  let base = eigOf(probeType, noise);
+  if (responseMode === 'fluent') base *= 0.72;
+  else if (responseMode === 'stuck') base *= 0.85;
+  if (repeatStreak > 0) base *= Math.pow(0.55, repeatStreak);   // 0.55^n 快速衰减
+  // 不做 6 位量化：表达式只有 mul/add/log2，双精度在同构环境里本就确定性，
+  // 量化只会制造"为什么这个值少了末位"的困惑，没有任何可复现性收益。
+  return base;
+}
+
+// 从候选类型里挑 EIG 最高的一枚（平手时按传入顺序取先者——确定性，可复现）
+function pickByEig(candidates, opts = {}) {
+  const list = (Array.isArray(candidates) && candidates.length) ? candidates : [];
+  let best = null, bestEig = -Infinity;
+  for (const c of list) {
+    const e = adjustedEig({ probeType: c, ...opts });
+    if (e > bestEig) { bestEig = e; best = c; }
+  }
+  return { probeType: best || list[0] || null, eig: bestEig === -Infinity ? 0 : bestEig };
+}
+
 // 层级升降（递进原理：ZPD 动态脚手架）
 function calibrateLevel(baseKey, responseMode) {
   const order = ['clarify', 'example', 'cause', 'hypothesis', 'counterexample', 'metacog'];
@@ -126,9 +277,9 @@ function pickStance(target, probeType) {
 }
 
 // ---- 主入口：组装问句规格 ----
-// 入参：{ target, probeType, weakPoint?, humanLastUtterance?, responseMode?, round? }
-// 返回确定性 spec（LLM 据此说出口）
-function buildQuestionSpec({ target, probeType, weakPoint = null, humanLastUtterance = '', responseMode = null, round = 1 }) {
+// 入参：{ target, probeType, weakPoint?, humanLastUtterance?, responseMode?, round?, focus?, cost? }
+// 返回确定性 spec（LLM 据此说出口）；focus 非空时启用单轮单概念约束
+function buildQuestionSpec({ target, probeType, weakPoint = null, humanLastUtterance = '', responseMode = null, round = 1, focus = null, cost = null } = {}) {
   const rm = responseMode || inferResponseMode(humanLastUtterance);
   const baseKey = PROBE_TO_LEVEL[probeType] || 'cause';
   const levelKey = calibrateLevel(baseKey, rm);
@@ -152,7 +303,21 @@ function buildQuestionSpec({ target, probeType, weakPoint = null, humanLastUtter
     track,
     waitPrefix: WAIT.prefix,
     waitAfterAnswer: WAIT.afterAnswer,
+    // 单轮单概念：默认视为未换题（不带 focus 调用的旧路径保持原行为）
+    focusShifted: false,
+    focusedOn: target,
   };
+}
+
+// 组装 + 单轮单概念约束（先算 spec，再约束 focus，最后给出停时判定）
+// 返回 { spec, continueDecision }
+function planNextProbe({ target, probeType, weakPoint = null, humanLastUtterance = '', responseMode = null, round = 1, focus = null, prevUtterance = '', cost = null, maxRounds = 8 } = {}) {
+  const spec = buildQuestionSpec({ target, probeType, weakPoint, humanLastUtterance, responseMode, round });
+  const constrained = enforceSingleFocus(spec, focus);
+  const gain = estimateGain({ utterance: humanLastUtterance, prevUtterance });
+  const c = cost === null ? 0.35 : cost;
+  const continueDecision = shouldContinue({ round: round + 1, gain, cost: c, maxRounds });
+  return { spec: constrained, continueDecision, gainEstimated: gain };
 }
 
 // 把 spec 渲染成喂给 LLM 的中文指令串（替代原 teacher.js 内联 wpHint）
@@ -189,4 +354,7 @@ module.exports = {
   PROBE_TO_LEVEL,
   stableHash, mirrorAnchor, inferResponseMode, calibrateLevel, pickStance,
   buildQuestionSpec, renderWpHint,
+  tokenize, estimateGain, shouldContinue, enforceSingleFocus, planNextProbe,
+  // EIG 选问（信息调度，替代轮转调度）
+  CHANNEL_NOISE, PRIOR_ANSWERS, bernoulliEntropy, eigOf, adjustedEig, pickByEig,
 };

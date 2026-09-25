@@ -67,6 +67,8 @@
     font-size:12px; line-height:1.55; font-weight:600; box-shadow:0 8px 22px rgba(0,0,0,.55);
     opacity:0; transition:opacity .22s, transform .22s; pointer-events:none; }
   .stu .bub.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+  /* 体验节奏："镜子只接住、不追问"那一拍的气泡——灰一点、弱一点，一眼看出这一拍不问 */
+  .stu .bub.quiet{ background:rgba(246,244,238,.94); color:#5f5950; font-weight:500; box-shadow:0 6px 16px rgba(0,0,0,.38); }
   .stu .bub .mis{ display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
     margin-top:4px; font-weight:400; font-size:10.5px; line-height:1.45; color:#8a6a3a;
     border-top:1px dashed #ddd2b8; padding-top:3px; }
@@ -344,11 +346,15 @@ function buildCast(list){
 //   两版都来自假理论（模型采样自评 / 2-gram 噪声判定），已删除。学生就是镜子，不给他打分。
 function speak(name, on){ const e = els[name]; if (!e) return; e.root.classList.toggle('speaking', !!on); }
 function think(name, on){ const e = els[name]; if (!e) return; e.root.classList.toggle('thinking', !!on); }
-function bubble(name, text){
+// quiet=true：体验节奏里"镜子只接住、不追问"的那一拍。
+//   气泡照旧出，但**不占提问位**（不加 speak 动画、不进 transcript/回顾题），
+//   停得更久一点——这个瞬间本来就该被看见，而不是一闪而过。
+function bubble(name, text, quiet){
   const e = els[name]; if (!e) return;
   e.bub.innerHTML = escapeHtml(text || '（未发言）');   // 只显示学生说的话；名字/前概念不露体验层
   e.bub.classList.add('show');
-  clearTimeout(e._t); e._t = setTimeout(() => e.bub.classList.remove('show'), 7000);
+  if (quiet) e.bub.classList.add('quiet');
+  clearTimeout(e._t); e._t = setTimeout(() => { e.bub.classList.remove('show', 'quiet'); }, quiet ? 9000 : 7000);
 }
 function escapeHtml(s){ return String(s == null ? '' : s).replace(/[&<>]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;' }[c])); }
 function cue(text, ms){ const el = $('cue'); el.textContent = text; el.classList.add('on');
@@ -841,6 +847,13 @@ function handleEvent(ev){
     // LLM 在跑的时候讲台条是隐藏的，这里给个明确反馈，免得老师以为卡住了
     $('status').textContent = '学生们在交头接耳…';
     setBar('hide');
+    return;
+  }
+  // 体验节奏：不是每一拍都提问。
+  //   reflect = 镜子只接住先生刚说的话、不追问。这一拍**不进问题记录**（clsAsks/回顾题），
+  //   视觉上也比提问轻——它是"被听懂"的那一拍，不是"又问了一个"的那一拍。
+  if (ev.type === 'reflect'){
+    bubble(ev.name, ev.text, true);        // 第三参 = 轻吐字，见 bubble()
     return;
   }
   // （understand 事件已删除：它带的是学生自评理解度 R 的假数，服务端不再发；学生头顶不再有理解度进度条）

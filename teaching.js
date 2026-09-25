@@ -185,8 +185,27 @@ function teachingRelation(world, teacherId, studentIds) {
 function quotable(s, max) {
   const cap = max || 20;
   let t = String(s == null ? '' : s).replace(/[「」“”"]/g, '').replace(/\s+/g, ' ').trim();
-  if (t.length > cap) t = t.slice(0, cap).replace(/[，,、；;：:。]+$/, '') + '…';
-  return t || '这个说法';
+  if (t.length <= cap) return t || '这个说法';
+  let cut = t.slice(0, cap);
+  // 括号没配平就退回上一个"（"——"…变成糖（储存…"这种半截括号看着像 bug
+  const openN = (cut.match(/[（(【]/g) || []).length;
+  const closeN = (cut.match(/[）)】]/g) || []).length;
+  if (openN > closeN) {
+    const li = Math.max(cut.lastIndexOf('（'), cut.lastIndexOf('('), cut.lastIndexOf('【'));
+    if (li > 0) cut = cut.slice(0, li);
+  }
+  // 已配平的"插入语"（"变成糖（储存能量）和氧"）连着一起让位 → "变成糖（储存能量）"，
+  //   不然会切出"…和氧…"这种半个词的引用。
+  const li2 = cut.lastIndexOf('）');
+  if (li2 > 0 && li2 < cut.length - 1) cut = cut.slice(0, li2 + 1);
+  // 优先断在标点处（硬切会碎掉一个词，"…和氧…"读着像断了气）；断在完整句子上就不加省略号
+  const marks = cut.match(/[，,、；;：:。！？!?]/g);
+  if (marks) {
+    const last = marks[marks.length - 1];
+    const idx = cut.lastIndexOf(last);
+    if (idx >= Math.floor(cap * 0.6)) return cut.slice(0, idx) || cut;
+  }
+  return cut + '…';
 }
 const MISCONCEPTION_TPL = [
   (a) => `以前听过「${a}」，但一直没当真`,

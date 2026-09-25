@@ -42,13 +42,51 @@ const {
 } = require('./teaching.js');
 const {
   buildQuestionSpec, renderWpHint, inferResponseMode,
+  estimateGain, shouldContinue, adjustedEig,
 } = require('./questioning.js');   // TCMQ 确定性提问引擎（提问方法论解耦为独立模块）
+const {
+  BEAT, BEAT_TEXT, beatFor, beatIsAsking, beatRationale,
+  reflectLine, closeLine, varyPhrase,
+} = require('./experience.js');    // 体验节奏引擎（人获得体验，不是被机器人盘问）
+// 几何算子层（Γ 信息散度 / Φ 断链 / β 概念同调 / ⊕ 轨迹幺半群，均为纯函数、不评分）
+const geom = require('./geometry.js');
+// 巩固分析层：Λ 概念格（形式概念分析）+ Σ 覆盖骨架（Nerve 1-骨架）
+//   Λ 与 Σ 是 docs/09 §八里唯二还标"路线"的算子；2026-09-25 落码，与 Γ/⊕/Φ/β 并列进纪要。
+const lat = require('./lattice.js');
+const cvg = require('./convergence.js'); // 不动点分析：Banach 压缩映射定理应用到反射序列（2026-09-25 落）
+const alm = require('./analogy.js');   // 类比结构分析（映射思想的元应用：照见学生自己搭的映射，2026-09-25 落）
+const conj = require('./conjugacy.js'); // 拓扑共轭应用：学生概念轨迹 vs 教材脉络（2026-09-25 落）
+const fn = require('./functor.js');     // 函子自然性自检：镜面在没改口时是否前后一致（2026-09-25 落）
+const bis = require('./bisim.js');      // 互模拟商：弱信号序列坍缩成根误类（2026-09-25 落）
+const ref = require('./referent.js');    // 同指识别：N 个表达坍缩成 1 个被识别的东西（复合映射纤维/商，2026-09-25 落）
+const comp = require('./composite.js');  // 多层复合映射：N 轮合成一步 g=f_N∘…∘f_1（2026-09-25 落）
 const reflection = require('./public/reflection.js');   // 双稿制确定性反思引擎（总结方法论解耦为独立模块）
 
 const llm = require('./llm.js');   // LLM 传输层已抽离为独立连接器（见 llm.js）
 const { KEY, MODEL, MODEL_CHAIN, oneCall, orChat, sfChat, llmStatus, llmUsable, markDead, LLM_BUDGET_MS } = llm;
 const { buildWeakGraph } = require('./graph.js');   // G 图论盲区网（路线）
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// —— 追问停时（最优停时判据，见 docs/09-数学框架.md §9.7.2）——
+//   τ* = argmax E[I_n − c·n]：这一轮问出了新东西，减去打断你说的成本，谁大接着问。
+//   继续追问 ⟺ E[ΔI_{n+1} | F_n] > c。c 是"你愿意被追问多密"的价格，**由人定，引擎不代定**——
+//   所以它是显式常量、可由环境变量覆盖，并随 start 事件报给前端，不在任何地方被模型推断。
+//   ⚠️ gain 是 estimateGain 的**代理度量**（新词占比），不是真实互信息：真实信息增益需要"人的真值"，
+//      而 A2 禁止引擎表示掌握概率。停时结论随 c 单调翻转，c 由人设才使这条判据有意义。
+const QUESTION_COST = Number(process.env.LINGJING_QUESTION_COST) > 0
+  ? Number(process.env.LINGJING_QUESTION_COST)
+  : 0.35;
+// 停止原因的人话（只描述机器可观测的事实，不下"你没进步"这类判定）
+function stopReasonHuman(reason, gain) {
+  if (reason === 'budget-exhausted') return '已经问到你设定的轮次上限了';
+  if (reason === 'gain-below-cost') return `这轮你答的和上一轮差不多（新信息 ${(Number(gain) || 0).toFixed(2)}），问下去多半还是重复`;
+  return '这轮没有值得再问的新东西';
+}
+// 停止原因的机器可读标签（前端/日志用；与 questioning.js shouldContinue 的 reason 同源）
+const STOP_REASON_LABEL = {
+  'gain-below-cost': 'new-info-not-worth-the-cost',
+  'budget-exhausted': 'round-budget-reached',
+};
 
 // （LLM 传输层已抽离至独立模块 llm.js：模型降级链 / 额度熔断 / 端点覆盖 / oneCall / orChat。
 //   本文件只通过上方 `const llm = require('./llm.js')` 取用，密钥仅读环境变量。）
@@ -144,10 +182,47 @@ function probeTarget(concepts, k, round) {
   const M = Math.max(1, concepts.length);
   return concepts[(((k + round - 1) % M) + M) % M] || concepts[0] || '先生讲的内容';
 }
-// 本轮该学生抛哪一类探测：错开，保证一场课六类都会出现
-function probeKind(k, round) {
+// 本轮该学生抛哪一类探测：**信息调度**，取代旧的"按轮次轮转"。
+//
+// 旧实现（PROBE_ORDER 轮转）的毛病：第几轮抛哪一类写死在数组里，问什么跟"这一问值不值"无关——
+//   上一轮刚问过反例、这一轮照样轮到反例，也可能该问澄清时它还在推进反例。
+// 新实现：每轮在六类里挑**期望信息增益 EIG 最高**的一枚（=H_b(ε+(1−2ε)p_t)−H_b(ε)，见 questioning.js），
+//   并对三种情况打折：这个类上一轮问过（别连着打同一个方向）、老师这轮答得流畅（这个方向他已讲透）、
+//   老师这轮卡住（这枚问太深）。平手时按 PROBE_ORDER 原顺序落定 → 仍可复现。
+//   ⚠️ 不评分：EIG 只说"这枚问句自身有多可能产生信息"，不表示人答得好不好（A2）。
+//
+// ⚠️ 但纯贪心会退化，而且这是**数学上的必然不是意外**：EIG 在 p_t≈0.5 取最大，
+//    故 p_t∈[0.4,0.55] 的几类（counter/bound/hypothesis）基础 EIG 全挤在 0.376~0.390 的窄带里；
+//    纯贪心每轮挑同一个，选完打折、下轮换个同类又打平，实测序列就是在两个最高者之间来回摆
+//      （bound → apply → bound → apply → …），澄清/举例/机制这几层一次都轮不到。
+//    而本产品的探测本来就是分层认知操作（澄清→举例→因果→假设→反例→元认知），
+//    只问"边界/应用"等于把最值钱的分层能力弄丢了。所以加一层**覆盖优先**约束：
+//    ① 前 coverRounds 轮，先把本场还没照到的类放进候选池（保证六类都被照一次）；
+//    ② 候选池内部再按 EIG 挑最高的。分层覆盖是骨架，EIG 只做池内优选。
+//
+// ⚠️ 适用边界（别把 EIG 当万能钥匙）：EIG 最大化的是"这枚问句能消除多少不确定性"，
+//    而本产品的增量价值是**照出盲区**——两者并不完全重合。典型反例是 `distinct`（这两个说法差在哪）：
+//    它基础 EIG 最低（p_t=0.9，人必然答），可恰恰是"人以为自己懂了、其实混淆了两个概念"的**高发区**。
+//    纯 EIG 会几乎永不优先问它。所以分层覆盖约束必须保留：EIG 只决定池内顺序，不决定要不要照到。
+//    一句话：EIG 管"问哪一枚更值"，不管"哪些层面必须被照到"。
+function probeKind(k, round, { responseMode = null, recentTypes = [], coverRounds = 6 } = {}) {
   const n = PROBE_ORDER.length;
-  return PROBE_ORDER[(((k + round - 1) % n) + n) % n];
+  const seen = new Set(recentTypes.filter(Boolean));
+  const unseen = PROBE_ORDER.filter((t) => !seen.has(t));
+  const pool = (round <= coverRounds && unseen.length) ? unseen : PROBE_ORDER;
+
+  const streakOf = (t) => {
+    let s = 0;
+    for (let i = recentTypes.length - 1; i >= 0 && recentTypes[i] === t; i--) s++;
+    return s;
+  };
+  let best = null, bestEig = -Infinity;
+  for (const t of pool) {
+    const e = adjustedEig({ probeType: t, responseMode, repeatStreak: streakOf(t) });
+    if (e > bestEig) { bestEig = e; best = t; }
+  }
+  // 全被折扣压到同值（理论上不会，保险起见）→ 退回轮转，保证课堂一定cover到不同类型
+  return best || PROBE_ORDER[(((k + round - 1) % n) + n) % n];
 }
 
 // 信息论覆盖（概念空间）：探测对要点的覆盖 + 剩余盲区熵；覆盖 ≠ 掌握，只报事实
@@ -247,10 +322,28 @@ const VOICE_OPEN = {
   '小丽': (s) => '那个……' + s,
   '小华': (s) => '这个我懂！不过——' + s,
 };
+// 拼接清洁：接话开头以"那/嗯/哦"收尾、问句本体又自带一个"那" → "那那要是…"，读起来像卡顿。
+// 例：REACT_OPEN 小明「明白了明白了，那」+ PROBE_FRAME.counter[0]「那要是把…」
+//   → 旧行为是硬拼成"明白了明白了，那那要是把…"（旧代码就有的 bug，不是本轮引入）。
+// 只削掉**重复的那一个字**，其余照原样并排——不重写、不改写问句本意。
+const STAMMER_CHARS = '那哦嗯行对好';
+function joinNaturally(a, b) {
+  const x = String(a || ''), y = String(b || '');
+  if (!x || !y) return x || y;
+  if (STAMMER_CHARS.includes(x.slice(-1)) && STAMMER_CHARS.includes(y.slice(0, 1))) {
+    return x + y.slice(1);
+  }
+  return x + y;
+}
+
 function fallbackSay(st, concept, kind, round, used = [], opts = {}) {
   const c = quotable(concept, 18);
   const pool = PROBE_FRAME[kind] || PROBE_FRAME.bound;
-  const build = (i) => (VOICE_OPEN[st.name] || ((s) => s))(pool[i % pool.length](c));
+  // 去模板化（体验层 experience.js）：**只作用在模板句本体上**，不作用在拼接结果上——
+  //   若加在最终结果前面，"接话开头"+"换问法前缀"会叠成"我打个比方问——明白了明白了，那…"。
+  //   作用于本体后，外层前缀照常包在外面，读起来是"明白了明白了，那我换个问法——…"。
+  const seed = round * 7 + (st.i || 0);
+  const build = (i) => (VOICE_OPEN[st.name] || ((s) => s))(varyPhrase(pool[i % pool.length](c), seed));
   // 先按轮次挑，撞了已说过的话就顺延换骨架（换不出新的就接受重复）
   let line = '';
   for (let i = 0; i < pool.length + 2; i++) {
@@ -262,7 +355,7 @@ function fallbackSay(st, concept, kind, round, used = [], opts = {}) {
   if (opts.teacherReply) {
     const opens = REACT_OPEN[st.name] || ['嗯，那'];
     const open = opens[(round + (st.i || 0)) % opens.length];
-    const merged = open + line;
+    const merged = joinNaturally(open, line);   // 旧行为"明白了明白了，那"+"那要是把…"="…那那要是…"
     if (!used.includes(merged)) line = merged;
   }
   return line;
@@ -423,11 +516,56 @@ async function mirrorAsk(st, ctx) {
 // 依据认知研究：学习只在学生到达 impasse（卡住）之后发生，学生不制造卡点，讲得再好也没用。
 async function studentTurn(st, ctx) {
   const { kind, target, round, concepts, teacherReply, i } = ctx;
-  const say = await mirrorAsk(st, ctx);
+  const raw = await mirrorAsk(st, ctx);
   // 分配 'land'（薄教案）时强制保留，不让本地正则把"落地挑战"误判成普通六类之一
   const kind2 = kind === 'land' ? 'land' : kind;
-  const finalSay = say || fallbackSay(st, target, kind2, round, st.memory.map((m) => m.text), { teacherReply, i });
-  return { say: finalSay, type: kind2, usedLLM: !!say, ci: ctx.targetIdx };   // ci = 盯住的是第几个要点
+  //   LLM 说出口的不再叠加换说法（它本来就自然），只有兜底语料需要去模板化——
+  //   模板感正是兜底语料的问题，不是产品的问题。
+  const finalSay = raw || fallbackSay(st, target, kind2, round, st.memory.map((m) => m.text), { teacherReply, i });
+  return { say: finalSay, type: kind2, usedLLM: !!raw, ci: ctx.targetIdx };   // ci = 盯住的是第几个要点
+}
+
+// ===== 镜子的「接住」拍：这一拍不追问，只把先生刚说的话举回去 =====
+//
+// 产品原则（用户 2026-09-25 拍板）：**这个产品让人获得体验，不是让机器人采集信息。**
+//   旧实现每拍必抛一枚探测 —— 人从头到尾被追问，像在给一台评估器交作业。
+//   这里给课堂加入"呼吸"：ECHO / PAUSE / CLOSE 三拍镜子只说一句（多数时候就一句），
+//   然后把话头交回给先生。真正让人感到"被听见"的往往就是这一下，不是第 8 个问题。
+//
+// ⚠️ 不评分（A2）：映照句只做两件事——原样举回他的话 + 一句好奇。
+//    绝不出"讲得好 / 答错了 / 你这里没掌握"这类判定。测试里锁了这条（tools/test_experience.mjs）。
+//
+// ── Γ 织入（2026-09-25）─────────────────────────────────────────────
+// 只在 **PAUSE（留白）拍** 启用，理由是节奏上的：留白拍本来就说"接住你这句"，
+// 不追问；把 Γ 的缺口并到这一拍，内容升级而节奏不变。若加到 ECHO/DEEPEN 拍上，
+// 就成了"每轮都补一刀"，立刻退回盘问。
+//
+// 口径：Γ **不做任何"讲透/没讲透"的判断**（见 geometry.divergence 的自我纠错——
+//   词面重合不等于内容到位）。这里只报一件事：**教案里哪几句话你这句没提到**，
+// 措辞是摆事实，不是评价。
+function gapEcho({ utterance = '', reference = '' }) {
+  const d = geom.divergence({ utterance, reference });
+  if (!d.missingPhrases || !d.missingPhrases.length) return '';
+  const gaps = d.missingPhrases.filter((s) => s && typeof s === 'string').slice(0, 1);
+  if (!gaps.length) return '';
+  return `它那边还摆着一句「${gaps[0]}」，你这句没带到。`;
+}
+
+async function reflectTurn(st, ctx) {
+  const { round, teacherReply, beat, seed, reference = '' } = ctx;
+  const r = (beat === BEAT.PAUSE)
+    ? reflectLine({ utterance: teacherReply, beat: BEAT.PAUSE, seed })   // 留白：连好奇都不给
+    : reflectLine({ utterance: teacherReply, beat: BEAT.ECHO, seed });
+  let say = r.say;
+  if (beat === BEAT.CLOSE) say = closeLine(round + (st.i || 0));
+  // Γ 只走留白拍（见上方说明）
+  if (beat === BEAT.PAUSE && teacherReply) {
+    let g = '';
+    try { g = gapEcho({ utterance: teacherReply, reference }); } catch (e) { g = ''; }
+    if (g) say = (say ? say : '') + g;
+  }
+  if (!say) say = `${st.name}没再追问，只是把先生那句在嘴里过了一遍。`;
+  return { say, type: 'reflect', usedLLM: false, beat: beat || BEAT.ECHO };
 }
 
 // ===== 课堂会话（支持"老师回话 → 学生再反应"的闭环）=====
@@ -454,6 +592,17 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
   const teacher = { id: w.addAgent({ kind: 'agent', name: '你（教师）', profession: 'teacher' }), name: '你（教师）' };
 
   const lessonTitle = lesson.title;
+  // ⚠️ 容错：CLI 的 "标题::内容" 写法若被直接喂进 createSession，会把标题一起焊进第一个"概念"里，
+  //   于是这个概念（"光合作用::植物用阳光…"）人类永远说不出来，靠它匹配的算子（β/Φ/Σ）就永远空转。
+  //   这里按 parseLesson 的同一套规则拆一次，保证 API 与 CLI 走同一份概念提取。
+  if (typeof lesson.content === 'string' && lesson.content.includes('::') && !Array.isArray(lesson.concepts)) {
+    const i = lesson.content.indexOf('::');
+    const t = String(lesson.title || '').trim();
+    const head = lesson.content.slice(0, i).trim();
+    if (!t || head === t) {
+      lesson = { ...lesson, title: t || head, content: lesson.content.slice(i + 2).trim() };
+    }
+  }
   const lessonText = lesson.content;
   const concepts = extractConcepts(lessonText, lesson.concepts);   // 定义1（须先于学生创建：前概念要挂到概念上）
   const lessonThin = assessLessonConcreteness(lessonText).thin;     // 薄教案（口号式空话）→ 走"落地挑战"分支
@@ -490,6 +639,10 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
   let round = 0;
   let done = false;
   let _result = null;
+  // 上一轮老师的回答文本（停时判据要拿它当"新信息"的比较基准；不表示掌握概率，只比文本）
+  let lastTeacherReply = '';
+  // 老师是否已给过一次真实回答（第一次回答不参与逐字比较，否则相对"课题"会被误判为没新信息）
+  let answeredOnce = false;
 
   // 第 1 拍：教师讲授（公理3：外部输入）-> lesson 作品持久留世界
   w.addArtifact({ owner: teacher.id, kind: 'artifact', payload: { type: 'lesson', role: 'lesson', title: lessonTitle, content: lessonText } });
@@ -498,6 +651,8 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
     return {
       type: 'start',
       lessonTitle, lessonText, concepts, difficulties, maxRounds,
+      // 追问成本 c 随 start 报出：它**由人设**（环境变量 LINGJING_QUESTION_COST），引擎不推断、不代定
+      questionCost: QUESTION_COST,
       usedLLM: llmUsable(),
       llm: llmStatus(),
       students: students.map((s) => ({ name: s.name, trait: s.trait, alpha: s.alpha, voice: s.voice, catch: s.catch, mis: s.mis })),
@@ -508,7 +663,58 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
     round += 1;
     if (teacherReply) memory.push({ round: round - 1, speaker: '老师', text: teacherReply });
     onEvent({ type: 'round_start', round, teacherReply: teacherReply || '' });
-    onLog(`-- 第${round}轮 --${teacherReply ? `（老师回答：${teacherReply}）` : ''}`);
+
+    // —— 体验节奏（experience.js）：一节课是一段有呼吸的对话，不是一条信息流水线 ——
+    //   第 1 拍抛探测把人拉进来，中间隔几拍给一次"只照不问"，收尾前留一次闭嘴。
+    //   拍子只由总轮数决定，**不观测任何人表现**——一旦按表现加码，课堂立刻变考场。
+    const beat = beatFor(round, maxRounds);
+    const asking = beatIsAsking(beat);
+    onLog(`-- 第${round}轮 [${BEAT_TEXT[beat]}] --${teacherReply ? `（老师回答：${teacherReply}）` : ''}`);
+    if (!asking) onLog(`  ${beatRationale(beat)}`);
+
+    // —— 追问停时判据（docs/09 §9.7.2）：先问"这一轮还值不值得追问"，不值就直接收，不再生成探测 ——
+    //   两条前置条件：① 第 1 轮（课堂开场，尚无"回答"这件事）不判定；
+    //                 ② 本轮 teacherReply 为空（例如收尾触发的空回话）也不是一次有效回答，同样不判定。
+    //   ⚠️ 停是**诚实收尾**（finalize），不是判定"你没学会"——引擎不表示掌握概率（A2），只说"没新东西可问了"。
+    const hasAnswer = Boolean(teacherReply && teacherReply.trim());
+    if (round > 1 && hasAnswer) {
+      // 第一次认真回答：相对"你的课题/讲解"作答，先按"有信息"处理（与 estimateGain 的首轮语义一致）；
+      // 第二次起才和上一轮逐字比——重复回答的假增益就是在这里被挡掉的。
+      const gain = answeredOnce ? estimateGain({ utterance: teacherReply, prevUtterance: lastTeacherReply }) : 1;
+      answeredOnce = true;
+      const dec = shouldContinue({ round, gain, cost: QUESTION_COST, maxRounds });
+      lastTeacherReply = teacherReply;
+      // 收束拍优先于停时判据：排好的拍子里最后一拍本来就是 CLOSE，
+      //   该由它说那句收尾话。否则用户看到的是"已经问到你设定的轮次上限了"——
+      //   这是机器在汇报预算，不是一堂课在收尾。
+      const closing = beat === BEAT.CLOSE;
+      if (dec.stop || closing) {
+        if (closing) {
+          // 收束拍：由 CLOSE 那句话收尾——"这一课收在这儿"，而不是汇报预算
+          const st0 = students[0] || { name: '镜子' };
+          const line = closeLine(round);
+          onEvent({
+            type: 'reflect', round, beat: BEAT.CLOSE, beatText: BEAT_TEXT[BEAT.CLOSE],
+            name: st0.name, text: line, asks: false, closes: true,
+          });
+          onLog(`  ${st0.name}［${BEAT_TEXT[BEAT.CLOSE]}］：${line}`);
+        } else {
+          const why = stopReasonHuman(dec.reason, dec.gain);
+          onEvent({
+            type: 'probe_stop', round, reason: dec.reason,
+            reasonLabel: STOP_REASON_LABEL[dec.reason] || dec.reason,
+            why, gain: Number(dec.gain).toFixed(3), cost: QUESTION_COST, humanSays: '追问到此为止',
+          });
+          onLog(`【停时】第${round}轮不再追问：${why}（gain=${Number(dec.gain).toFixed(3)} ≤ c=${QUESTION_COST}）`);
+        }
+        await finalize(onEvent, onLog);   // 走 done 事件收尾：前端按既有 done 流程结束课堂，不会卡在等下一轮
+        return;
+      }
+      onLog(`【停时】继续追问：本轮新信息 gain=${Number(dec.gain).toFixed(3)} > c=${QUESTION_COST}`);
+    } else {
+      // 开场/空回话：基准只在还空着时落到「第 1 拍讲授」——那才是老师真正的开场内容
+      if (!lastTeacherReply) lastTeacherReply = lessonText;
+    }
 
     const peerLines = memory.filter((m) => m.speaker !== '老师').slice(-4).map((m) => `${m.speaker}：${m.text}`);
 
@@ -527,6 +733,19 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
     for (let si = 0; si < speakers.length; si++) {
       const k = speakers[si];
       if (si) await sleep(250);   // 免费池并发挤掉（429）防护：发言者之间留一点间隔
+
+      // —— 非追问拍：镜子只接一句、不抛探测（体验节奏的核心；旧实现这里必定抛一枚）——
+      //   探测装配（薄弱点 / 概念覆盖 / wpHint）整段跳过，turns[k] 已由 reflectTurn 填好；
+      //   第二段循环照常播出，只是发的是 reflect 事件、不进 probes 序列。
+      if (!asking) {
+        turns[k] = await reflectTurn(students[k], {
+          // reference = 教案原文：Γ 拿它当"标准说法"，量人这句离它多远
+          i: k, round, beat, teacherReply: teacherReply || '', seed: round * 5 + k * 3,
+          reference: lessonText || '',
+        });
+        continue;
+      }
+
       // 本轮探测任务：优先把这一枚探测钉到"未消耗、严重度最高"的薄弱点上（确定性定位）；
       // 同一轮多位发言者各取一个不同的薄弱点（按 si 偏移），避免两人问同一处。
       let wp = null, wi = 0;
@@ -549,7 +768,13 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
         wpHint = LAND_HINT(lessonText, round);
       } else {
         target = probeTarget(concepts, k, round);
-        kind = probeKind(k, round);
+        // EIG 信息调度：这一轮抛哪一类，按"哪枚问的信息量最大"挑，并避让上一轮问过的方向。
+        //   recentTypes = 本场已抛出的探测类型（最近的几条），用于算"连续重复"折扣；
+        //   responseMode = 老师这一轮的作答状态，答得流畅/卡住都会调低该方向的 EIG。
+        kind = probeKind(k, round, {
+          responseMode: inferResponseMode(teacherReply),
+          recentTypes: probes.slice(-4).map((p) => p.type),
+        });
         targetIdx = (((k + round - 1) % Math.max(1, concepts.length)) + Math.max(1, concepts.length)) % Math.max(1, concepts.length);
         const spec = buildQuestionSpec({
           target, probeType: kind, weakPoint: null,
@@ -586,6 +811,24 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
     for (let si = 0; si < speakers.length; si++) {
       const st = students[speakers[si]], turn = turns[speakers[si]];
       if (si) await sleep(SILENCE_PAUSE);   // 沉默：轮到开口前先留白
+
+      // —— 非追问拍：这一拍不产出探测，只发一句"接住"的话—————————————————
+      //   不发 probe_stop 之类内部标签，也不进 probes 序列（它不是探测）。
+      if (turn && turn.beat && turn.beat !== BEAT.DEEPEN) {
+        if (turn.say) {
+          onEvent({
+            type: 'reflect', round, beat: turn.beat, beatText: BEAT_TEXT[turn.beat] || '接住你说的话',
+            name: st.name, text: turn.say, asks: turn.beat === BEAT.ECHO,
+          });
+          onLog(`  ${st.name}［${BEAT_TEXT[turn.beat] || '接住'}］：${turn.say}`);
+          st.last = turn.say;
+          st.memory.push({ round, text: turn.say });
+          memory.push({ round, speaker: st.name, text: turn.say });
+          w.addArtifact({ owner: st.id, kind: 'artifact', payload: { type: 'note', role: 'reflect', text: turn.say, round } });
+        }
+        continue;   // 不进 probes、不算 llmOk 探测数
+      }
+
       // ⚠️ 2026-09-11：Δp / P / E / σ² / H 与"自评理解度 R"全部删除。学生头顶不再表示任何"程度"。
       onEvent({ type: 'probe', round, name: st.name, mis: st.mis });
       await sleep(200);
@@ -608,8 +851,12 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
     const llmOk = turns.filter((t) => t.usedLLM).length;   // 本轮真走 LLM 的学生数（诚实标注用）
     const roundProbes = probes.filter((p) => p.round === round);
     // 机器只报事实：这一轮学生问了几枚；"你答到了几枚"要等人类课后逐条判（不预判）
-    onEvent({ type: 'round_end', round, canContinue, llmOk, probeCount: roundProbes.length });
-    onLog(`第${round}轮：学生抛出探测 ${roundProbes.length} 枚（LLM 学生 ${llmOk}/${students.length}）· 你答到了几枚，课后逐条对照着判`);
+    onEvent({ type: 'round_end', round, beat, beatText: BEAT_TEXT[beat], canContinue, llmOk, probeCount: roundProbes.length });
+    if (asking) {
+      onLog(`第${round}轮：学生抛出探测 ${roundProbes.length} 枚（LLM 学生 ${llmOk}/${students.length}）· 你答到了几枚，课后逐条对照着判`);
+    } else {
+      onLog(`第${round}轮：这一拍镜子没追问，只接住了先生的话（不统计探测枚数）。`);
+    }
     rounds.push({ round, utterances, llmOk, probes: roundProbes, teacherReply: teacherReply || '' });
     return { round, canContinue };
   }
@@ -712,6 +959,43 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
     }));                                                        // Δ*：问够才三划分
     const fading = zpdFading(probes);                          // ZPD：脚手架渐退曲线
     const weakGraph = buildWeakGraph([{ concepts, weakPoints: weakPool, probes }]);  // G：盲区网
+
+    // ── Λ 概念格 · Σ 覆盖骨架 · Φ 搬运（2026-09-25 落：docs/09 §八唯二的"路线"补上）───────
+    // 形式背景的对象不是"课"，是**你这节课一次次开口的那一轮**（单课内也能算，格才有意义）；
+    // 属性＝该轮话里触发的弱信号类型（jargon/jump/abstract/parrot/omit，与 detectWeakPoints 同源）。
+    // 于是 Λ 回答"哪几轮是同一个毛病"，Σ 回答"这些毛病在时间轴上堆成什么形状"。
+    // ══ Λ / Σ / Φ 三件 ══
+    const mineRounds = memory
+      .filter((m) => m.speaker === '老师' && m.text)
+      .map((m) => ({ round: m.round, text: String(m.text) }))
+      .sort((a, b) => (a.round || 0) - (b.round || 0));
+    const coPairs = geom.cooccurrence({ lines: memory, concepts });      // β 与 Φ 共用同一份共现证据
+    // 信号源用"本句 + 前一句"的并集（与 β 共现的 window=1 同理）：
+    //   单独一句常常凑不齐五类信号里的任一条（它们多半要靠上下文才判得出来），
+    //   只看单句会让 Λ 在任何课上都是空集——那不是诚实，是没接上。
+    const roundHits = mineRounds.map((r, i) => {
+      const hits = detectWeakPoints(r.text, concepts);
+      const ctx = i > 0 ? `${mineRounds[i - 1].text}。${r.text}` : r.text;
+      const ctxHits = i > 0 ? detectWeakPoints(ctx, concepts) : [];
+      const sigs = [...new Set([...hits, ...ctxHits].map((w) => w.signal))];
+      // 光靠五类弱信号当属性太窄：这堂课整课检测下来是空集，只有某一轮蹦出几条，
+      // 格就只剩一个节点。补一条每轮都有的确定性文本事实（该轮回答是否带出前提/例子/边界），
+      // 与 detectWeakPoints 同源口径（isClarifying），不是新造的判据。
+      const clarifiedByThisRound = teacherReplies.some((tr) => tr.round === r.round && tr.clarifying);
+      if (clarifiedByThisRound) sigs.push('clarify');
+      return { round: r.round, text: r.text, signals: sigs, hits };
+    });
+    // Λ：形式概念分析（枚举 2^|M| 子集取闭包去重；不是 Ganter NextClosure——闭包不保序，见 lattice.js 注释）
+    const lattice = lat.analyzeLattice(roundHits.map((r) => ({ id: r.round, title: `第${r.round}轮`, signals: r.signals })));
+    // Σ：把每轮被钉出的口子当下云点，课时轴当 filter，看它们沿时间铺成什么
+    //   label 截短——薄教案下"概念"就是整句，整句塞进人话里没法读。
+    const nerve = lat.nerveSkeleton({
+      points: roundHits.flatMap((r) => r.hits.map((w) => ({ round: r.round, label: String(w.concept).slice(0, 8) }))),
+      coverRadius: 1.5,
+    });
+    // Φ：逐段算"这一轮相对上一轮搬了多远"（共现即地面代价，无共现就不出数）
+    const transport = geom.transportAlong({ lines: mineRounds, concepts, pairs: coPairs });
+
     const gains = {
       points: pts.length,                       // 你讲出的要点条数
       replies: teacherReplies.length,           // 你回答了几轮
@@ -736,6 +1020,26 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
       conceptEntropy: Number(cov.entropy.toFixed(2)),
       conceptEntropyMax: Number(cov.maxEntropy.toFixed(2)),
       meaning: w.relatedness(teacher.id),                        // 意义供给 = 教师在 R 图度中心性（共在他人数）
+
+      // ── 几何算子层（Γ / Φ / β / ⊕，2026-09-25 落）────────────────
+      // 四条都只描述形状，不给人打分（A2）。它们进纪要，是让人**看见**自己话的形状。
+      trajectory: geom.trajectory(memory.filter((m) => m.speaker === '老师')),  // ⊕：你原话的保序回放
+      // Φ：取你说过的**最长的一段**做断链定位（短句无从定位，报出来是噪音）
+      breakPoint: (() => {
+        const mine = memory.filter((m) => m.speaker === '老师' && m.text)
+          .slice().sort((a, b) => String(b.text).length - String(a.text).length);
+        if (!mine.length) return null;
+        const r = geom.findBreak({ utterance: String(mine[0].text), reference: lessonText || '' });
+        return r.onTarget ? null : { round: mine[0].round, tail: r.tail };
+      })(),
+      shape: (() => {                                                            // β：概念有没有绕成圈
+        const h = geom.homology({ concepts, pairs: coPairs });
+        return { ...h, speak: geom.describeShape(h, concepts) };
+      })(),
+      // Λ / Σ / Φ 三条（2026-09-25 落）
+      lattice,
+      nerve,
+      transport,
     };
 
     // —— 教师元认知收益层（需求⑥：教中学 / protégé effect + IOED + 费曼）——
@@ -757,6 +1061,38 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
       + `没收到的（NEG）：${verdictCounts.NEG} 枚。\n`
       + `POS 只表示"先生的回答里出现了前提/例子/边界"这个文本特征，不代表你答透了——那一步永远由你判。`;
 
+    // ── ⊕ 轨迹回放（自由幺半群）：严���保序，顺序本身就是信息 ──
+    // 不是把 transcript 换个位置重贴一遍——自由幺半群的要点是**不可交换**：
+    // 先说 A 再说 B，跟先说 B 再说 A 是两回事。所以这里带轮次编号回放你自己的话，
+    // 让人看见自己话是怎么一节一节长起来的（回看时顺序不能乱）。
+    const traj = gains.trajectory;
+    if (traj && traj.length > 0) {
+      teacherReportMd += '\n\n## 你在这节课上说过的话（保序回放）\n'
+        + traj.sequence.map((s) => `第${s.round}轮：${s.text}`).join('\n')
+        + `\n\n（共 ${traj.length} 段，顺序不可交换：先说后说不是一回事，回放时不能打乱。）`;
+      // Φ：只在明显塌陷时提一句，不每段都判——每句都报"你跳走了"就成了挑刺。
+      if (gains.breakPoint && gains.breakPoint.tail) {
+        teacherReportMd += `\n第 ${gains.breakPoint.round} 轮那段，后半截你带到了「${gains.breakPoint.tail}」，`
+          + `跟前半截不是一条线上的。它标的是**对齐塌陷的位置**，不是你有错。\n`;
+      }
+    }
+
+    // ── β 拓扑（Vietoris–Rips）：这几个概念在你话里绕成圈了吗 ──
+    // 诚实口径：Rips 滤只有增长、没有分裂，所以环一旦成形不会消亡——
+    //   这里报的是它的**出生半径**（环有多紧），不是寿命。
+    const shape = gains.shape;
+    if (shape && (shape.cycles.length || shape.clusters.length)) {
+      let t = '\n\n## 这几个概念在你的话里长成了什么形状\n';
+      t += shape.speak.line + '\n';
+      if (shape.clusters.length) {
+        t += `另外，有几撮是贴在一起的：` + shape.clusters
+          .filter((c) => c.verts.length > 1)
+          .map((c) => c.verts.map((v) => concepts[v]).join('·')).join('；') + '。\n';
+      }
+      t += `（用 Vietoris–Rips 滤看共现：共现越多距离越近。环的"紧"用出生半径量，越小越咬得死。）`;
+      teacherReportMd += t;
+    }
+
     // 路线-cheap：G 盲区网 + m 证据区间（人话、不评分、不露内部数字）
     if (weakGraph.mainHubs.length) {
       teacherReportMd += '\n\n## 你的盲区连成了一张网\n'
@@ -769,6 +1105,146 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
       const wide = evidence.filter((e) => e.n > 0 && (e.plausibility - e.belief) >= 0.5)
         .map((e) => `「${e.concept}」（探了 ${e.n} 枚，机器还拿不准）`);
       if (wide.length) teacherReportMd += '有几处机器尤其没把握，值得你多讲一遍：' + wide.join('、') + '。';
+    }
+
+    // ── Λ 概念格（形式概念分析）：哪几轮是同一个毛病 ──
+    //   Λ 与现在的"复现次数"不是一回事：计数只说"它出现过几次"，格能说
+    //   "第 2、4、7 轮这三轮**恰好共享同一组信号**"——那才是可命名的卡点类型。
+    if (lattice && lattice.concepts.length > 1 && lattice.hasStructure) {
+      let t = '\n\n## 你这几轮是同一个毛病吗\n' + lattice.line + '\n';
+      t += lattice.chronic.slice(0, 3).map((c) =>
+        `「${c.intent.join('+')}」：撞在第 ${c.extent.map((i) => roundHits[i] && roundHits[i].round).join('、')} 轮，`
+        + '这几轮的毛病是同一组，不是三次巧合。').join('\n') + '\n';
+      if (lattice.note) t += `（${lattice.note}）`;
+      t += cvg.fcaFixedPointNote(lattice);
+      teacherReportMd += t;
+    }
+
+    // ── Σ 覆盖骨架（Nerve 1-骨架）：盲区沿时间轴铺成什么形状 ──
+    //   Σ 与 β 分工：β 看"概念之间绕不绕成圈"（静态），Σ 看"口子之间随时间挤不挤"（沿时间）。
+    const nrv = lat.describeNerve(gains.nerve);
+    if (nrv.hasShape) {
+      teacherReportMd += '\n\n## 你的口子是散着还是扎堆\n' + nrv.line + '\n';
+    }
+
+    // ── Φ 最优传输（离散 OT，共现作地面代价）：你这节课搬过几次家 ──
+    if (transport && transport.series.length) {
+      teacherReportMd += '\n\n## 你的话搬了几次家\n' + transport.line + '\n';
+      if (transport.note) teacherReportMd += `〔${transport.note}〕\n`;
+    }
+
+    // ── 类比结构分析（映射思想的元应用）：学生搭的类比本身就是一个映射 ──
+    //   Gentner SME：类比 = 源域→靶域映射，映射的是关系而非属性；本算子照见学生建的映射保真/破裂。
+    //   与 Λ/Σ/Φ 同口径守 A2：只描述结构，绝不出"理解度/对错"量。
+    const analogy = await alm.analyzeAnalogMapping({
+      rounds: mineRounds,
+      targetConcept: lessonTitle,
+      lessonContent: lessonText,
+    });
+    if (analogy.found) {
+      teacherReportMd += '\n\n## 你的类比，本身就是一个映射\n' + analogy.body;
+      if (analogy.note) teacherReportMd += `\n〔${analogy.note}〕`;
+    }
+
+    // ── 不动点分析（Banach 压缩映射定理）：这面镜子的反射序列在收敛吗 ──
+    //   Φ 的逐轮 W1 距离 = 相邻两轮反射态之间的距离；几何递减 ⇒ 序列 Cauchy ⇒ 收敛到不动点。
+    if (transport && transport.series.length) {
+      const cv = cvg.analyzeConvergence(transport.series);
+      teacherReportMd += '\n\n## 你的理解在收敛吗（不动点）\n' + cv.line + '\n';
+      if (cv.note) teacherReportMd += `〔${cv.note}〕\n`;
+    }
+
+    // ── 拓扑共轭（hf=gh）：你走过的概念图，与教材脉络是同一张吗 ──
+    //   共轭思想：两张“概念转移图”结构同构（仅重标号不同）⇒ 你重建出了作者本来的结构。
+    //   数据派生：教材脉络 = 各 concept 在 lessonText 中首次出现的顺序；
+    //            学生轨迹 = 每轮触及的 concept 集合，按轮次抽出有序轨迹。
+    if (Array.isArray(concepts) && concepts.length && mineRounds.length) {
+      const lessonCanonical = concepts
+        .map((c) => ({ c, i: lessonText.indexOf(c) }))
+        .filter((o) => o.i >= 0)
+        .sort((a, b) => a.i - b.i)
+        .map((o) => o.c);
+      const studentRoundConcepts = mineRounds.map((r) =>
+        concepts.filter((c) => r.text && r.text.indexOf(c) >= 0));
+      const cj = conj.analyzeConjugacy(studentRoundConcepts, lessonCanonical);
+      if (cj.ok) {
+        teacherReportMd += '\n\n## 你走过的图和教材是同一张吗（拓扑共轭）\n' + cj.line + '\n';
+        if (cj.note) teacherReportMd += `〔${cj.note}〕\n`;
+      }
+    }
+
+    // ── 函子 / 自然变换（镜子自检）：你没改口时，镜面是否前后一致 ──
+    //   自然性 = 同一 stance 跨轮次，镜面结构判定（是否归为“被命名卡点”）应一致。
+    //   数据派生：mirrored = 这轮触及的概念里有被 Λ 慢性卡点命名的；stance = 概念组合签名。
+    if (mineRounds.length >= 2 && lattice && Array.isArray(lattice.chronic)) {
+      const chronicConcepts = lattice.chronic
+        .reduce((acc, c) => acc.concat(c.intent || []), []);
+      const fnRounds = mineRounds.map((r) => {
+        const hit = concepts.filter((c) => r.text && r.text.indexOf(c) >= 0);
+        const mirrored = hit.some((c) => chronicConcepts.indexOf(c) >= 0);
+        return { round: r.round, stance: hit.join('|'), mirrored };
+      });
+      const fj = fn.checkNaturality(fnRounds);
+      if (fj.ok) {
+        teacherReportMd += '\n\n## 镜面自己前后一致吗（函子自然性）\n' + fj.line + '\n';
+        if (fj.note) teacherReportMd += `〔${fj.note}〕\n`;
+      }
+    }
+
+    // ── 互模拟商：你翻来覆去，其实归到几个根误类 ──
+    //   把每轮看成状态、弱信号集合看成观察标签，做互模拟划分求精 → 等价类坍缩。
+    if (mineRounds.length >= 2) {
+      const bj = bis.bisimQuotient(mineRounds.map((r) => ({ round: r.round, text: r.text })));
+      if (bj.ok) {
+        teacherReportMd += '\n\n## 你翻来覆去其实就几个根误（互模拟商）\n' + bj.line + '\n';
+        if (bj.note) teacherReportMd += `〔${bj.note}〕\n`;
+      }
+    }
+
+    // ── 同指识别（复合映射的纤维 / 商）：你不同说法，指的可是同一个东西 ──
+    //   用户洞见：1→2、2→3 是映射，合成 1→3 是复合映射（不变元）；1→N 是关系，
+    //   其反向 N→1 需归一化（商）。镜子建这个商：把 N 个表达坍缩成被识别的 1 个东西。
+    //   数据派生：每轮原话 → 指到的规范概念（concepts）；跨轮不同表达指同概念 ⇒ 同指簇。
+    if (mineRounds.length >= 2 && Array.isArray(concepts) && concepts.length) {
+      const utts = mineRounds.map((r) => ({ source: '你', round: r.round, text: r.text || '' }));
+      // 有 LLM 时启用语义同指增强（抓"奶茶排队"这种不提名但同指的表达）；无 key 回退词面。
+      const semanticAsk = (typeof llm.llmUsable === 'function' && llm.llmUsable())
+        ? async (text, cs) => {
+            const sys = '你是镜子里的语义裁判。只输出学生这段话指到的规范概念名（从给定列表选，可多个，用顿号隔开，没有就输出"无"）。不评分、不解释。';
+            const usr = `规范概念列表：${cs.join('、')}。\n学生原话：${text}\n指到哪些？`;
+            const r = await llm.orChat(sys, usr, { maxTokens: 60, deadline: 8000 }).catch(() => '');
+            if (!r || r.indexOf('无') >= 0) return [];
+            return r.split(/[、，\s]+/).filter((x) => cs.indexOf(x) >= 0);
+          }
+        : undefined;
+      const rj = await ref.referentCluster(utts, concepts, { semanticAsk });
+      if (rj.ok && rj.clusters.length) {
+        teacherReportMd += '\n\n## 你不同说法，指的可是同一个东西（同指识别）\n' + rj.line + '\n';
+        if (rj.note) teacherReportMd += `〔${rj.note}〕\n`;
+      }
+    }
+
+    // ── 多层复合映射（g = f_N∘…∘f_1）：你 N 轮合起来是一步什么映射 ──
+    //   用户追问 1→2→3→…→N 的多层复合：每层是一次映射，合成后压成一步直接 1→N 的净映射。
+    //   镜子照出：哪层是恒等/扩张/收窄/重构、有没有绕圈空转（互为逆层）、净变换把起点态变到哪。
+    //   与同指识别互补：同指是 N→1 的【静态商】，本段是逐层看"商怎么被一层层织出来"。
+    if (mineRounds.length >= 2 && Array.isArray(concepts) && concepts.length) {
+      const roundSetsForComp = mineRounds.map((r) => ({
+        round: r.round,
+        concepts: concepts.filter((c) => r.text && r.text.indexOf(c) >= 0),
+      }));
+      const lessonCanonicalComp = (lessonText && Array.isArray(concepts) && concepts.length)
+        ? concepts.map((c) => ({ c, i: lessonText.indexOf(c) }))
+            .filter((o) => o.i >= 0).sort((a, b) => a.i - b.i).map((o) => o.c)
+        : [];
+      const cp = await comp.analyzeComposite(roundSetsForComp, concepts, {
+        lessonCanonical: lessonCanonicalComp,
+        semanticAsk,
+      });
+      if (cp.ok) {
+        teacherReportMd += '\n\n## 你 N 轮合起来，是一步什么映射（多层复合映射）\n' + cp.line + '\n';
+        if (cp.note) teacherReportMd += `〔${cp.note}〕\n`;
+      }
     }
 
     // —— 作品：学生（镜子）共同的《课堂纪要》落盘 ——
@@ -901,7 +1377,13 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
       if (round >= maxRounds) { await finalize(onEvent, onLog); return { done: true }; }
       return playRound((text || '').trim(), onEvent, onLog);
     },
-    finish(onEvent, onLog) { return done ? { done: true } : finalize(onEvent, onLog); },
+    // 收尾并返回 result。
+    // ⚠️ 停时判据可能已经替我们 finalize 过一次（done=true 已有 result），此时必须把这个 result **交回去**——
+    //   否则调用方（测试 / 3D 页面）拿到的会是 `{done:true}`，课堂纪要、gains、verdictCounts 全部丢失。
+    finish(onEvent, onLog) {
+      if (done && _result) return _result;              // 已由停时收尾：交回已有 result，不重跑 finalize
+      return done ? { done: true } : finalize(onEvent, onLog);
+    },
   };
 }
 
@@ -939,4 +1421,7 @@ if (require.main === module) {
 module.exports = {
   createSession, runClassroom, parseLesson, orChat, sfChat, oneCall, cleanSay, pickChineseLine, parseTurn, takeSay,
   fallbackSay, PERSONALITIES, studentTurn, MODEL, MODEL_CHAIN, llmStatus, llmUsable, markDead,
+  probeKind, PROBE_ORDER, conceptCoverage,
+  // 体验节奏（用户拍板：产品让人获得体验，不是让机器人采集信息）
+  reflectTurn, BEAT, BEAT_TEXT, beatFor,
 };

@@ -10,7 +10,11 @@ const ok = (c, m) => { if (!c) { fail++; console.log('  ✗ ' + m); } else conso
 const TITLE = 'Δ三态验证课';
 
 // 用 createSession 驱动：开课 → 每轮教师回话（或无）→ 下课，返回真实 result
-async function runWithReplies(replies, maxRounds = 3) {
+// ⚠️ maxRounds=4：体验节奏（experience.js）下并非每拍都产出探测——
+//   planBeats(4) = [DEEPEN, DEEPEN, PAUSE, CLOSE]，只有 2 个追问拍。
+//   取 4 是为了拿到 ≥2 枚探测，否则一问一答测不出"三态随回答而变"。
+//   最后一拍固定为 CLOSE（说收尾话，不产出探测），所以断言里不能指望"最后一枚必然 NEG"。
+async function runWithReplies(replies, maxRounds = 4) {
   const lesson = {
     title: TITLE,
     content: '植物用阳光作能量。因为阳光被叶绿体吸收，所以这能量被转成化学能，把水和二氧化碳变成糖，并放出氧气。因此，叶子发黄多半是缺光或水太多。',
@@ -49,17 +53,23 @@ console.log('\n== Δ 三态跨输入真变动（防摆设）==');
 const rA = await runWithReplies([
   '因为前提是这样，比如你提到的那个点其实是有条件的。',
   '所以要注意，比如换个情况就不成立了。',
+  '举个例子，同样的做法在别的场景里就会失效。',
+  '换个边界：如果条件反过来，结论就不一样了。',
 ]);
 // B：每轮只回"好的。"（极简、未澄清）
-const rB = await runWithReplies(['好的。', '好的。']);
+const rB = await runWithReplies(['好的。', '好的。', '好的。', '好的。']);
 // C：全程不回话（所有探测都收不到回答）
 const rC = await runWithReplies([]);
 
 ok(rA.verdictCounts && rB.verdictCounts && rC.verdictCounts, '三场课 result 都带 verdictCounts');
-ok(rA.verdictCounts.POS > 0 && rA.verdictCounts.NEG > 0 && rA.verdictCounts.BND === 0,
-  `A（澄清回话）：POS>0 且 NEG>0、无 BND（实得 POS=${rA.verdictCounts.POS}/BND=${rA.verdictCounts.BND}/NEG=${rA.verdictCounts.NEG}）`);
-ok(rB.verdictCounts.BND > 0 && rB.verdictCounts.NEG > 0 && rB.verdictCounts.POS === 0,
-  `B（极简回话）：BND>0 且 NEG>0、无 POS（实得 POS=${rB.verdictCounts.POS}/BND=${rB.verdictCounts.BND}/NEG=${rB.verdictCounts.NEG}）`);
+ok(rA.verdictCounts.POS > 0 && rA.verdictCounts.NEG === 0 && rA.verdictCounts.BND === 0,
+  `A（澄清回话）：全 POS、无 BND/NEG（实得 POS=${rA.verdictCounts.POS}/BND=${rA.verdictCounts.BND}/NEG=${rA.verdictCounts.NEG}）`);
+// B 只要求"BND>0 且无 POS"：复读"好的。"没有新词，会被停时判据**正确地**在中途收掉课堂，
+//   于是最后一枚探测收不到回答（NEG）。那是停时在干活，不是三态判错了——不把它算作失败。
+ok(rB.verdictCounts.BND > 0 && rB.verdictCounts.POS === 0,
+  `B（极简回话）：BND>0 且无 POS（实得 POS=${rB.verdictCounts.POS}/BND=${rB.verdictCounts.BND}/NEG=${rB.verdictCounts.NEG}）`);
+ok(rB.verdictCounts.BND > 0 && rB.verdictCounts.NEG <= 1,
+  'B：极简回话不会被误判成 POS——"好的"里没有前提/例子/边界，一个都不许进 POS');
 ok(rC.verdictCounts.NEG === rC.probes.length && rC.verdictCounts.POS === 0 && rC.verdictCounts.BND === 0,
   `C（不回话）：全部 NEG、无 POS/BND（实得 NEG=${rC.verdictCounts.NEG}/${rC.probes.length}）`);
 
