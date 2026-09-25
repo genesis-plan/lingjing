@@ -61,6 +61,7 @@ const bis = require('./bisim.js');      // 互模拟商：弱信号序列坍缩�
 const ref = require('./referent.js');    // 同指识别：N 个表达坍缩成 1 个被识别的东西（复合映射纤维/商，2026-09-25 落）
 const comp = require('./composite.js');  // 多层复合映射：N 轮合成一步 g=f_N∘…∘f_1（2026-09-25 落）
 const mbridge = require('./mapbridge.js'); // 大模型↔零权重模型桥：NL讲授→大模型抽映射→mapmodel诊断（2026-09-25 落）
+const fnc = require('./function.js');      // 函数思想算子（fn 已被 functor.js 占用）
 const reflection = require('./public/reflection.js');   // 双稿制确定性反思引擎（总结方法论解耦为独立模块）
 
 const llm = require('./llm.js');   // LLM 传输层已抽离为独立连接器（见 llm.js）
@@ -1206,18 +1207,23 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
     //   用户洞见：1→2、2→3 是映射，合成 1→3 是复合映射（不变元）；1→N 是关系，
     //   其反向 N→1 需归一化（商）。镜子建这个商：把 N 个表达坍缩成被识别的 1 个东西。
     //   数据派生：每轮原话 → 指到的规范概念（concepts）；跨轮不同表达指同概念 ⇒ 同指簇。
+    //
+    // ⚠️ 2026-09-25 夜修正（真 bug）：semanticAsk 原先声明在下面 referent 的 if 块【内部】，
+    //    而 composite 块（以及本次新增的单值性检查）在块外引用它——const 是块级作用域，
+    //    两个 if 条件完全相同，所以走到就必然 ReferenceError。单元测试只测模块、没跑 finalize，
+    //    一直没暴露。现提升到 if 块之外，供同指识别 / 复合映射 / 单值性共用。
+    const semanticAsk = (typeof llm.llmUsable === 'function' && llm.llmUsable())
+      ? async (text, cs) => {
+          const sys = '你是镜子里的语义裁判。只输出学生这段话指到的规范概念名（从给定列表选，可多个，用顿号隔开，没有就输出"无"）。不评分、不解释。';
+          const usr = `规范概念列表：${cs.join('、')}。\n学生原话：${text}\n指到哪些？`;
+          const r = await llm.orChat(sys, usr, { maxTokens: 60, deadline: 8000 }).catch(() => '');
+          if (!r || r.indexOf('无') >= 0) return [];
+          return r.split(/[、，\s]+/).filter((x) => cs.indexOf(x) >= 0);
+        }
+      : undefined;
     if (mineRounds.length >= 2 && Array.isArray(concepts) && concepts.length) {
       const utts = mineRounds.map((r) => ({ source: '你', round: r.round, text: r.text || '' }));
-      // 有 LLM 时启用语义同指增强（抓"奶茶排队"这种不提名但同指的表达）；无 key 回退词面。
-      const semanticAsk = (typeof llm.llmUsable === 'function' && llm.llmUsable())
-        ? async (text, cs) => {
-            const sys = '你是镜子里的语义裁判。只输出学生这段话指到的规范概念名（从给定列表选，可多个，用顿号隔开，没有就输出"无"）。不评分、不解释。';
-            const usr = `规范概念列表：${cs.join('、')}。\n学生原话：${text}\n指到哪些？`;
-            const r = await llm.orChat(sys, usr, { maxTokens: 60, deadline: 8000 }).catch(() => '');
-            if (!r || r.indexOf('无') >= 0) return [];
-            return r.split(/[、，\s]+/).filter((x) => cs.indexOf(x) >= 0);
-          }
-        : undefined;
+      // 语义增强钩子已在上方声明（有 LLM 时抓"奶茶排队"这种不提名但同指的表达）；无 key 为 undefined，回退词面。
       const rj = await ref.referentCluster(utts, concepts, { semanticAsk });
       if (rj.ok && rj.clusters.length) {
         teacherReportMd += '\n\n## 你不同说法，指的可是同一个东西（同指识别）\n' + rj.line + '\n';
@@ -1272,6 +1278,39 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
           teacherReportMd += '\n\n## 你讲的概念，连成了一张映射网（断头/孤源/环/缝隙）\n' + line;
         }
       } catch (_) { /* 抽映射失败不影响主线，静默跳过 */ }
+    }
+
+    // ── 函数思想（大学数学第2节）：单值性 / 覆盖 / 意象vs定义 ──
+    //   文献支撑：Vinner & Dreyfus 1989（意象≠定义）；Evangelidou et al. 2004（把函数讲窄成一一对应
+    //   是记录在案的经典误解）；funext 外延相等；函数=全+单值、反函数⟺双射。
+    //   ⚠️ 只接"数据干净"的三个算子：单值性(原话→概念)、覆盖(值域/对应域)、意象vs定义(教材定义 vs 你举的例子)。
+    //      外延相等 与 可逆性 需要一个干净的【概念→概念】函数对象，当前 mapbridge 产出的是多值关系
+    //      （一概念可有多条出边），不是函数——硬套会失真，故已实现并测过，暂不接线，不臆造。
+    if (mineRounds.length && Array.isArray(concepts) && concepts.length) {
+      try {
+        // ① 单值性：一话多指 ⇒ 非良定义（是关系不是函数）⇒ 真歧义
+        const wd = await fnc.checkWellDefined(
+          mineRounds.map((r) => ({ round: r.round, text: r.text || '' })), concepts, { semanticAsk });
+        if (wd.ok) {
+          teacherReportMd += '\n\n## 你的表达满足"函数"的单值性吗（良定义）\n' + wd.line + '\n';
+          if (wd.note) teacherReportMd += `〔${wd.note}〕\n`;
+        }
+        // ② 覆盖：值域 vs 对应域（缺口/越界）。
+        //    totality（"提到了但没解释"）需要可靠的"讲清楚"信号，目前没有，故 domain 传与 image 相同，
+        //    不臆造"非全"结论——诚实留白，等有信号再补。
+        const mentioned = concepts.filter((c) => mineRounds.some((r) => (r.text || '').indexOf(c) >= 0));
+        const cov = fnc.analyzeCoverage({ domain: mentioned, image: mentioned, codomain: concepts });
+        if (cov.ok) {
+          teacherReportMd += '\n\n## 值域覆盖到对应域了吗（覆盖缺口）\n' + cov.line + '\n';
+          if (cov.note) teacherReportMd += `〔${cov.note}〕\n`;
+        }
+        // ⑤ 意象 vs 定义：教材定义 vs 你举的例子，口径是否等宽（只报错位，不错位就不出声）
+        const ivd = fnc.imageVsDefinition(lessonText || '', mineRounds.map((r) => r.text || ''));
+        if (ivd.ok && (ivd.narrowed || ivd.widened)) {
+          teacherReportMd += '\n\n## 你的例子和你的定义，是同一个宽窄吗（意象 vs 定义）\n' + ivd.line + '\n';
+          if (ivd.note) teacherReportMd += `〔${ivd.note}〕\n`;
+        }
+      } catch (_) { /* 不影响主线 */ }
     }
 
     // —— 作品：学生（镜子）共同的《课堂纪要》落盘 ——
