@@ -677,7 +677,8 @@ function teacherReport(diag, ctx) {
   }
   L.push('');
   L.push(`### 二、学生问到的地方，逐条摆给你（答到了没有，你自己判）`);
-  L.push('这一课五个学生一共抛出 **' + diag.probeTotal + '** 枚探测'
+  const _n = (ctx && ctx.studentCount) || 1;
+  L.push('这一课' + (_n === 1 ? '这面镜子' : _n + ' 名学生') + '一共抛出 **' + diag.probeTotal + '** 枚探测'
     + (diag.probeLine ? `（${diag.probeLine}）` : '') + '，'
     + `其中 **${diag.answered}** 枚你给了回答，**${diag.openCount}** 枚你没回。`);
   if (diag.pairs.length) {

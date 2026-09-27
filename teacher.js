@@ -1053,7 +1053,7 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
     // 把课堂里**真实说过的话**（你的要点、你是否带出前提/例子、学生问了什么、你答了什么）整理成
     // 人话反馈：不替你下"答到了没有"的结论，而是把问题与你的回答并排放好，逼你自己正视。
     const teacherDiag = teacherDiagnosis({ points: pts, teacherReplies, probes });
-    let teacherReportMd = teacherReport(teacherDiag, { title: lessonTitle });
+    let teacherReportMd = teacherReport(teacherDiag, { title: lessonTitle, studentCount: (typeof students !== 'undefined' ? students.length : 1) });
     // 概念覆盖（信息论，非掌握度）：把"探测覆盖多少要点 / 剩余盲区"作为可观测事实报给教师
     const covLine = `本节课你讲了 ${cov.total} 个要点，学生探测覆盖了 ${cov.covered} 个`
       + `（盲区：${cov.uncovered.length ? cov.uncovered.join('、') : '无'}）；`

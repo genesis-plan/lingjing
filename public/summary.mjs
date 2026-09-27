@@ -237,12 +237,12 @@ export function buildSummary(ev, opts = {}) {
     { branch: '分析 / 微分方程', math: '热传导 FTCS + 遗忘曲线 dR/dt=−R/S', value: `能量 ${energyNorm.toFixed(2)}`,
       meaning: '知识像热一样在课室里扩散、也会冷却；下面给了每张卡的复习时刻。' },
     { branch: '代数 / 关系', math: '世界 ⟨S,R,M,T⟩', value: `${(ev && ev.teachingEdges) || 0} 条 teach 边 · ${artCount} 件作品`,
-      meaning: '你的讲解被作为"外部输入"接进世界模型，与 5 名学生建立了教学关系。' },
+      meaning: '你的讲解被作为"外部输入"接进世界模型，与这面镜子（学生）建立了教学关系。' },
     { branch: '控制论 / 优化', math: 'Flow 通道（你的澄清度 − 概念难度）', value: `gap=${gap.toFixed(3)}`,
       meaning: replies === 0 ? '这一课你没有回答，Flow 判据没有样本。'
         : (Math.abs(gap) <= 0.07 ? '你在心流通道里——这是最有效的表达带宽。' : (gap < 0 ? '概念比你的习惯表达更难，把步子拆细、多给生活例子。' : '概念的难度低于你平时的解释深度，可以换真会卡壳的东西来讲。')) },
     { branch: '统计', math: '探测构成（六类计数）', value: (probeKinds && gains.probeLine) || gains.probeLine || '—',
-      meaning: '本课五名学生一共抛出多少枚探测、各属哪一类。**反例与边界例越多，越能照出你讲解里没交代的口子**。' },
+      meaning: '本课学生一共抛出多少枚探测、各属哪一类。**反例与边界例越多，越能照出你讲解里没交代的口子**。' },
     { branch: '组合 / 序列', math: 'DSR 反解复习时刻（初值只由难度定）', value: reviewAt.map((t) => t + 'd').join(' → '),
       meaning: '复习时刻的**初值只由概念难度**算（我们不知道你掌握没掌握，所以不编）；之后由你自己复习时的评分来修正。' },
   ];
