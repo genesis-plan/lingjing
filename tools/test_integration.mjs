@@ -20,7 +20,7 @@ ok(Array.isArray(r.probes) && r.probes.length > 0, `probes 探测流存在(${r.p
 ok(r.probes.every((p) => !!p.type), '每枚探测都带类型（反例/边界/正例/区分/机制/应用）');
 ok(Array.isArray(r.probeByConcept) && r.probeByConcept.length === r.concepts.length, `probeByConcept 覆盖每个要点`);
 ok(!('finalP' in r) && !('avgR' in r) && !('H' in r) && !('conceptCaught' in r), '产物中不再有 finalP / avgR / H / conceptCaught（假理论已清）');
-ok(r.teachingEdges === 5, `teachingEdges=${r.teachingEdges}`);
+ok(r.teachingEdges === r.students.length, `teachingEdges=${r.teachingEdges}（应等于学生/镜子数 ${r.students.length}）`);
 ok(r.artifacts > 0, `artifacts=${r.artifacts}`);
 
 const deck = buildDeck(r, { heatEnergy: 1.5, heatRef: 4 });

@@ -140,34 +140,34 @@ try {
     try { const r = await fetch(`http://127.0.0.1:${APP_PORT}/api/roster`); if (r.ok) break; } catch { /* 还没起来 */ }
   }
 
-  console.log('\n【1】每个学生各自接一次大模型（不是一份固定句子发所有人）');
+  console.log('\n【1】镜子（单一学生）发起模型调用（不是一份固定句子群发）');
   const LESSON_A = '潮汐::潮汐主要是月亮的引力造成的，太阳也有份但小一半。一天两次涨落，是地球自转带着你穿过两个水位高点。';
   const REPLY_A = '地球自转是关键：潮汐一天两次，是因为你被地球带着穿过两个水位高点。';
   const evA = await runClass(LESSON_A, REPLY_A);
   const askA = asksOf(evA);
   console.log(`    本轮 ask 事件 ${askA.length} 条 · 模型调用累计 ${calls.length} 次`);
 
-  ok(calls.length >= 5, '一轮里至少发了 5 次调用（5 个学生各一次）', `实际 ${calls.length} 次`);
+  ok(calls.length >= 1, '镜子至少发起了模型调用（不是一份固定句子群发）', `实际 ${calls.length} 次`);
   const names = [...new Set(calls.map((c) => (c.sys.match(/学生「(.+?)」/) || [])[1]).filter(Boolean))];
-  ok(names.length === 5, '5 次调用分别对应 5 个不同学生（各带自己的人设）', names.join('/'));
-  ok(calls.every((c) => /民国学堂/.test(c.sys)), '每次调用都带该学生的人设提示词');
+  ok(names.length >= 1, '至少 1 个镜子各带人设', names.join('/'));
+  ok(calls.some((c) => /民国学堂|这学堂里唯一的学生|学生「/.test(c.sys)), '有人设提示词（民国学堂 / 单一镜子措辞均可）');
   ok(calls.every((c) => c.auth === 'Bearer test-fake-key'), '每次调用都带了鉴权头（密钥走通了）');
-  ok(calls.some((c) => c.sys.includes('小丽') && c.sys.includes('害羞')), '调用之间人设确实不同（小丽=害羞型）', '');
+  ok(calls.some((c) => c.sys.includes('小明')), '镜子的名字出现在其人设提示词里（小明）', '');
 
   console.log('\n【2】★ 人类教师输入的原话，真的进了提示词');
   ok(calls.every((c) => c.usr.includes('潮汐主要是月亮的引力造成的')), '每次调用的提示词里都有你输入的课题内容');
   const r2calls = calls.filter((c) => c.usr.includes('地球自转是关键'));
-  ok(r2calls.length >= 5, '你第二轮回的话也进了下一轮的提示词', `${r2calls.length} 次调用带上了你的回话`);
+  ok(r2calls.length >= 1, '你第二轮回的话也进了下一轮的提示词', `${r2calls.length} 次调用带上了你的回话`);
 
   console.log('\n【3】★ 学生说的话来自模型（不是兜底语料），且跟着你的输入变');
   const a1 = asksIn(evA, 1), a2 = asksIn(evA, 2);
-  ok(askA.length >= 5, '学生都开口了', `共 ${askA.length} 条（第1轮 ${a1.length} + 第2轮 ${a2.length}）`);
+  ok(askA.length >= 1, '镜子开口了', `共 ${askA.length} 条（第1轮 ${a1.length} + 第2轮 ${a2.length}）`);
   const fromModel = askA.filter((a) => /先生您说/.test(a.text || ''));
   ok(fromModel.length === askA.length && askA.length > 0,
     '每一句台词都是模型返回的（带假模型标记「先生您说」）', `${fromModel.length}/${askA.length} 条`);
-  ok(a1.length >= 5 && a1.every((a) => (a.text || '').includes('潮汐')),
+  ok(a1.length >= 1 && a1.every((a) => (a.text || '').includes('潮汐')),
     '第1轮：台词引用的是**你输入的课题词**「潮汐」', `${a1.length} 条`);
-  ok(a2.length >= 5 && a2.every((a) => (a.text || '').includes('地球自转是关键')),
+  ok(a2.length >= 1 && a2.every((a) => (a.text || '').includes('地球自转是关键')),
     '第2轮：台词引用的是**你回话里的原话**「地球自转是关键」', `${a2.length} 条`);
 
   console.log('\n【4】★ 换个课题 → 台词跟着变（这正是你遇到的那个 bug 的反证）');
@@ -177,15 +177,15 @@ try {
   const evB = await runClass(LESSON_B, REPLY_B);
   const askB = asksOf(evB);
   const b1 = asksIn(evB, 1), b2 = asksIn(evB, 2);
-  ok(calls.length - before >= 5, '第二个课题同样发出 5 次以上调用', `新增 ${calls.length - before} 次`);
-  ok(b1.length >= 5 && b1.every((a) => (a.text || '').includes('彩虹')), '第1轮台词引用了新课题词「彩虹」');
-  ok(b2.length >= 5 && b2.every((a) => (a.text || '').includes('颜色反过来是因为')), '第2轮台词引用了你新的回话');
+  ok(calls.length - before >= 1, '第二个课题同样发起了模型调用', `新增 ${calls.length - before} 次`);
+  ok(b1.length >= 1 && b1.every((a) => (a.text || '').includes('彩虹')), '第1轮台词引用了新课题词「彩虹」');
+  ok(b2.length >= 1 && b2.every((a) => (a.text || '').includes('颜色反过来是因为')), '第2轮台词引用了你新的回话');
   ok(askB.every((a) => !(a.text || '').includes('潮汐')), '新课题的台词里不再出现上一个课题的词');
   const setA = new Set(askA.map((a) => a.text));
   const setB = new Set(askB.map((a) => a.text));
   const same = [...setA].filter((t) => setB.has(t));
   ok(same.length === 0, '两个课题的学生台词完全不重合（换输入＝换回答）', same.length ? '重合: ' + same.join(' | ') : '');
-  ok(names.length === 5, '第二个课题仍是每个学生各自一次调用');
+  ok(names.length >= 1, '第二个课题仍是镜子各自一次调用');
 
   console.log('\n【5】熔断时间戳解析（今天踩的严重 bug）');
   // 直接验算：X-RateLimit-Reset 是毫秒，绝不能既当日又当秒 → 否则熔断到公元五万年

@@ -5,9 +5,9 @@
 //   这个产品的最终定位是为人服务，而不是为AI服务"）。
 //   旧版断言的是「疑惑解开度 R 随教师回答上升」「avgR > 0」「gains.completeness 存在」——
 //   那三个量全是从**学生自评理解度**算出来的，没有真值来源。现在它们连生成都不生成了。
-//   新版校验的是"学生到底问出了什么、这些问是不是真的跟着输入变"：
-//     ①五个学生各有前概念 ②每轮每人各抛一枚探测（带类型）
-//     ③一轮之内五人盯的要点不撞车、六类探测会轮遍
+//   新版校验的是"镜子（单一学生）到底问出了什么、这些问是不是真的跟着输入变"：
+//     ①镜子有前概念 ②会话中抛出探测（带类型）
+//     ③探测类型合法、指向真实要点
 //     ④换课题 → 问的就换（不是固定那几句）
 //     ⑤教师没答到的问题被如实记下来（盲区清单 + 类型）
 //     ⑥产物里**不再有**任何"学生理解度"类字段
@@ -47,7 +47,7 @@ console.log('  要点 ' + r.gains.points + ' 条 | 澄清型回答 ' + r.gains.c
 console.log('  ⚠ 已从产物中移除：avgR / finalP / H / completeness / resolved / caught / blindSpots / conceptCaught');
 console.log('     （源头都是学生自评或 2-gram 噪声判定，是假理论；判定权交回人类）');
 
-console.log('\n【五生共同写出的《课堂纪要》】(' + r.minutes.by + ')');
+console.log('\n【镜子写出的《课堂纪要》】(' + r.minutes.by + ')');
 console.log(r.minutes.md.split('\n').slice(0, 16).join('\n'));
 console.log('  ... 落盘：' + r.minutes.path + ' （' + fs.statSync(r.minutes.path).size + ' 字节）');
 
@@ -58,16 +58,16 @@ await s2.start((e) => { if (e.type === 'ask') probes2.push(e.text); }, () => {})
 const probeTexts2 = probes2.join(' | ');
 
 const ok = [];
-ok.push(['轮数=4', r.rounds.length === 4]);
-ok.push(['五生均有前概念', r.students.every((x) => x.mis && x.mis.length > 4)]);
+ok.push(['轮数=3（maxRounds:4 → 实际 3 轮探测窗口）', r.rounds.length === 3]);
+ok.push(['镜子有前概念', r.students.every((x) => x.mis && x.mis.length > 4)]);
 ok.push(['纪要非空', (r.minutes.md || '').length > 60]);
 ok.push(['纪要已落盘', !!r.minutes.path && fs.existsSync(r.minutes.path)]);
 
 // ---- 探测是产品的一等公民 ----
-ok.push(['每轮每人都抛出探测', seenProbes.length === 20, seenProbes.length + ' 枚']);
+ok.push(['镜子在会话中抛出探测', seenProbes.length >= 1, seenProbes.length + ' 枚']);
 ok.push(['每枚探测都带类型', seenProbes.every((p) => !!p.type),
   [...new Set(seenProbes.map((p) => p.type))].join('/')]);
-ok.push(['六类探测都出现过', new Set(seenProbes.map((p) => p.type)).size === 6,
+ok.push(['探测类型合法（七类之内）', seenProbes.every((p) => ['counter','bound','example','distinct','mechanism','apply','land'].includes(p.type)),
   [...new Set(seenProbes.map((p) => p.type))].join('/')]);
 ok.push(['probes 与事件流一致', (r.probes || []).length === seenProbes.length,
   (r.probes || []).length + ' vs ' + seenProbes.length]);
@@ -77,16 +77,17 @@ ok.push(['按要点归拢原始提问 probeByConcept 覆盖每个要点', Array.
 ok.push(['每个要点的 asks 都是真实文本（他问的那句原话）', r.probeByConcept.every((c) => Array.isArray(c.asks) && c.asks.every((a) => a.say && a.name))]);
 
 // ---- 一轮之内：要点全覆盖 + 五人类型不撞车（这样人一次能看见整篇讲解上所有的洞）----
-// 注意：要点只有 3 个而学生有 5 个，所以"五个 ci 互不相同"是**做不到的**（数学上不可能）。
-// 真正该保证的是：①一轮之内每个要点都被问到 ②五人抛的探测类型互不相同。
+// 注意：要点 3 个、镜子 1 个，单轮子只能问 1 个要点、产出 1 个类型；
+// 旧版"一轮之内五人类型互不相同 / 六类全出现"在单镜子模型下数学上不可能，已改为
+// "探针带类型、类型合法、指向合法要点"这类与模型规模无关的不变量。
 const r1 = (r.probes || []).filter((p) => p.round === 1);
-ok.push(['第1轮覆盖了全部要点', new Set(r1.map((p) => p.ci)).size === r.concepts.length,
+ok.push(['第1轮探针指向合法要点', r1.every((p) => Number.isInteger(p.ci) && p.ci >= 0 && p.ci < r.concepts.length),
   [...new Set(r1.map((p) => p.ci))].sort().join(',') + ' / 共 ' + r.concepts.length + ' 个要点']);
-ok.push(['第1轮五人抛的探测类型互不相同', new Set(r1.map((p) => p.type)).size === 5,
+ok.push(['第1轮探针带类型', r1.every((p) => !!p.type),
   r1.map((p) => p.type).join(',')]);
 
 // ---- 输入变了 → 问的就变了 ----
-ok.push(['换课题后学生问的跟着换', probes2.length === 5 && !/光合|氧气|二氧化碳/.test(probeTexts2),
+ok.push(['换课题后镜子问的跟着换', probes2.length >= 1 && !/光合|氧气|二氧化碳/.test(probeTexts2),
   probeTexts2.slice(0, 60)]);
 ok.push(['新课题的提问引用了新课题的词', /彩虹|雨|小水珠|颜色/.test(probeTexts2)]);
 

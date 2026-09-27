@@ -44,7 +44,7 @@ ok('stub 收到至少 1 次请求', received.length >= 1);
 ok('鉴权头为 Bearer test-sf-key', received[0] && received[0].auth === 'Bearer test-sf-key');
 let bodyObj = null;
 try { bodyObj = JSON.parse(received[0].body); } catch {}
-ok('请求 model = deepseek-ai/DeepSeek-V3（默认限时免费模型）', bodyObj && bodyObj.model === 'deepseek-ai/DeepSeek-V3');
+ok('请求 model = deepseek-ai/DeepSeek-R1-0528-Qwen3-8B（真机实测免费模型）', bodyObj && bodyObj.model === 'deepseek-ai/DeepSeek-R1-0528-Qwen3-8B');
 ok('课题原文进 user 消息', !!bodyObj && JSON.stringify(bodyObj.messages).includes('月亮引力'));
 ok('回包含课题片段（端到端连通）', out.includes('月亮引力') || out.includes('潮汐'));
 ok('llmStatus 标出硅基流动提供商', /硅基流动/.test(llm.llmStatus().provider || ''));
