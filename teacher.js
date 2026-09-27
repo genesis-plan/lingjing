@@ -64,6 +64,8 @@ const mbridge = require('./mapbridge.js'); // 大模型↔零权重模型桥：N
 const yon = require('./yoneda.js');   // 米田引理：关系剖面=概念身份；照出"两个名字其实是同一个东西"（2026-09-25 落）
 const tfn = require('./teachingfn.js'); // 讲授作为函数：可逆性/跨时段/有界性/三种表示（复用 function.js 的 invertibility + funext，2026-09-26 落）
 const tsk = require('./tarski.js');   // Knaster–Tarski：不动点的定理保证 + 有限格上的迭代上界（2026-09-25 落）
+const gal = require('./galois.js');   // 伽罗瓦连接：镜子本体，盲区=所说≠闭包（2026-09-27 落）
+const coal = require('./coalgebra.js'); // 余代数/互模拟：无限讲授=余归纳流；条条大道通罗马=gfp（2026-09-27 落）
 const fnc = require('./function.js');      // 函数思想算子（fn 已被 functor.js 占用）
 const reflection = require('./public/reflection.js');   // 双稿制确定性反思引擎（总结方法论解耦为独立模块）
 
@@ -1310,6 +1312,16 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
             teacherReportMd += '\n\n## 你讲的两个名字，可能其实是同一个东西（米田引理）\n'
               + yind.line + '\n〔' + yind.note + '〕\n';
           }
+          // 全貌/规律：一个概念的"全貌"= 它被所有关系决定的不变核（米田引理：对象由其所有关系唯一确定）。
+          //   这里把它显影成一句话，不评分、只陈述事实。
+          const sample = concepts.find((c) => mb.model.concepts().includes(c)) || mb.model.concepts()[0];
+          if (sample) {
+            const co = yon.coReach(mb.model, sample);
+            teacherReportMd += '\n\n## 这概念的"全貌"：被所有关系决定的不变核（米田引理）\n'
+              + `「${sample}」经由所有指向它的关系所决定的不变结构，就是这概念的【全貌 / 规律】——`
+              + `你从越多角度逼近它，照出的都是同一个核（共 ${co.items.length} 条入射关系参与决定）。\n`
+              + '〔这是"极限=同一事物的全貌"在数学上的精确对应：范畴极限 = 与所有视角相容的万有对象。〕\n';
+          }
 
           // ── Knaster–Tarski：这张网上"走到底"的那一步，是最小不动点 ──
           //   传播算子 F(X)=X∪out(X) 在幂集格（有限完备格）上单调 ⇒ 最小不动点存在，
@@ -1319,6 +1331,55 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
           if (fp.ok) {
             teacherReportMd += '\n\n## 沿着你教的映射一直走，会停在哪（最小不动点）\n'
               + fp.line + '\n〔' + fp.note + '〕\n';
+          }
+
+          // ── 伽罗瓦连接：镜子本体 —— 你以为讲了一个点，其实牵连了一片却没说 ──
+          //   数学：FCA 派生算子 ↑↓ 构成伽罗瓦连接，复合 ↓↑ 是闭包算子，概念=该连接的不动点
+          //   （Basic Theorem of FCA, Wille 1982）。盲区 = 所说开集 ≠ 其闭包。
+          //   只对用户点名的 lesson 概念算盲区，且只报非空者，避免噪音（守 A2，不评分）。
+          const gctx = gal.fromMapModel(mb.model);
+          const blindLines = [];
+          for (const c of concepts) {
+            const bs2 = gctx.blindSpot(c);
+            if (bs2.ok && bs2.blind.length) blindLines.push(`· ${bs2.line}`);
+          }
+          if (blindLines.length) {
+            teacherReportMd += '\n\n## 这面镜子照出：你讲了这些，却漏说了它们牵连的（伽罗瓦连接）\n'
+              + blindLines.slice(0, 6).join('\n') + '\n'
+              + '〔闭包算子 ↓↑ 是扩张且幂等的，概念=该伽罗瓦连接的不动点；'
+              + '盲区=所说集合不等于它的闭包——你没明说、却被你的讲授结构蕴含的东西。〕\n';
+          }
+
+          // ── 余代数 / 互模拟：条条大道通罗马的严格判据 ──
+          //   数学：互模拟=谓词变换子的最大不动点（Knaster–Tarski gfp 对偶，Rutten 2000）。
+          //   若课程里存在两条"传授路径"（不同概念各自展开成一个子图），且这两张子图互模拟，
+          //   则它们通向同一个理解——这就是"条条大道通罗马"的定理版说法。
+          //   这里只做轻量探测：取两个被点名概念各自的出邻子图，判定是否互模拟（有界，超界诚实跳过）。
+          if (concepts.length >= 2) {
+            const subStates = [];
+            const stepOf = (root) => {
+              const seen = new Set([root]); const frontier = [root];
+              while (frontier.length) {
+                const x = frontier.shift();
+                for (const m of mb.model.maps()) {
+                  if (m.from === x && !seen.has(m.to)) { seen.add(m.to); frontier.push(m.to); }
+                }
+              }
+              return [...seen];
+            };
+            const a = concepts[0], b = concepts[1];
+            const states = [...new Set([...stepOf(a), ...stepOf(b)])];
+            if (states.length <= 40) {
+              const step = (s) => mb.model.maps().filter((m) => m.from === s).map((m) => m.to);
+              const bi = coal.bisimilar(a, b, states, step, { maxPairs: 1600 });
+              if (!bi.unknown) {
+                teacherReportMd += '\n\n## 你从不同角度讲的，通到同一个理解了吗（互模拟 / 条条大道通罗马）\n'
+                  + (bi.bisimilar
+                    ? `「${a}」与「${b}」各自的展开互模拟——它们结构等价，通向同一个理解。这正是"条条大道通罗马"的定理版说法（互模拟=最大不动点）。\n`
+                    : `「${a}」与「${b}」各自的展开【不】互模拟——它们通向的理解并不相同，你的讲授在这两点上还没收拢成同一处。\n`)
+                  + '〔互模拟是谓词变换子的最大不动点（与最小不动点同机两面）；镜子本身即一个余归纳流，append-only 是它的数学根据。〕\n';
+              }
+            }
           }
         }
       } catch (_) { /* 抽映射失败不影响主线，静默跳过 */ }

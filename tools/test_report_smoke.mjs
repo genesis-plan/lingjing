@@ -106,6 +106,26 @@ if (r) {
     const rep = tfn.representations({ definitionText: '函数是数集上的映射', rounds: [{ round: 1, text: '比如 x²。' }], conflict: false });
     check('⑧ 接线：representations 可跑且点名缺表格', rep.ok === true && rep.missing.some((m) => m.includes('表格')));
   }
+
+  // ── ⑨ 接线契约：galois（镜子本体）+ coalgebra（互模拟） ──
+  //   这两段是本轮新接进 teacher.js 的；端到端未必触发，故照真实形状钉死调用不抛、返回结构对。
+  {
+    const gal = (await import('../galois.js')).default;
+    const coal = (await import('../coalgebra.js')).default;
+    const fakeModel = {
+      concepts: () => ['x', 'y', 'z', 'w'],
+      maps: () => ([{ from: 'x', to: 'y' }, { from: 'y', to: 'z' }, { from: 'x', to: 'w' }]),
+    };
+    const gctx = gal.fromMapModel(fakeModel);
+    const bs = gctx.blindSpot('x');
+    check('⑨ 接线：galois.fromMapModel + blindSpot 可跑、返回 ok', bs.ok === true && Array.isArray(bs.blind));
+    const sc = gctx.selfCheck([new Set(['x']), new Set(['y']), new Set(['x', 'y'])]);
+    check('⑨ 接线：galois 伽罗瓦连接三律自检通过', sc.extensive && sc.idempotent && sc.antimonotone);
+    const states = ['a', 'b', 'a2', 'b2'];
+    const step = (s) => (s === 'a' ? ['b'] : s === 'b' ? [] : s === 'a2' ? ['b2'] : []);
+    const bi = coal.bisimilar('a', 'a2', states, step);
+    check('⑨ 接线：coalgebra.bisimilar 可跑、返回布尔', bi.unknown === false && typeof bi.bisimilar === 'boolean');
+  }
 }
 
 // 清理落盘的会话文件（验证产物，不留垃圾）
