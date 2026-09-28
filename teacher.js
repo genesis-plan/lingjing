@@ -63,6 +63,8 @@ const comp = require('./composite.js');  // 多层复合映射：N 轮合成一�
 const mbridge = require('./mapbridge.js'); // 大模型↔零权重模型桥：NL讲授→大模型抽映射→mapmodel诊断（2026-09-25 落）
 const yon = require('./yoneda.js');   // 米田引理：关系剖面=概念身份；照出"两个名字其实是同一个东西"（2026-09-25 落）
 const tfn = require('./teachingfn.js'); // 讲授作为函数：可逆性/跨时段/有界性/三种表示（复用 function.js 的 invertibility + funext，2026-09-26 落）
+const cc = require('./cognitive-convergence.js'); // 认知收敛判据：保号性+去心邻域+Heine 合成（2026-09-28 落）
+const rd = require('./report-diagram.js'); // 《我的收获》图表化：认知收敛/保号性/映射网/伽罗瓦盲区（2026-09-28 落）
 const tsk = require('./tarski.js');   // Knaster–Tarski：不动点的定理保证 + 有限格上的迭代上界（2026-09-25 落）
 const gal = require('./galois.js');   // 伽罗瓦连接：镜子本体，盲区=所说≠闭包（2026-09-27 落）
 const coal = require('./coalgebra.js'); // 余代数/互模拟：无限讲授=余归纳流；条条大道通罗马=gfp（2026-09-27 落）
@@ -177,9 +179,19 @@ const PROBE_ROLES = {
   apply:     (c) => `针对「${c}」，问先生：要是把条件换成别的，结果还会是这样吗？`,
   // 薄教案专用：把先生原话**原样举起来**逼落地，而不是装作有概念可探
   land:     (c) => `把你听到的先生那句话「${c}」**原样举起来**，质疑它太虚：问"这到底什么意思""它到底指什么""能不能拿一件具体的事说明白""它跟别的说法差在哪"。逼先生把口号落地成能懂的东西。`,
+  // 保号性（sign preservation）：你给的方向/符号判断，在邻近情形里还保号吗？逼"翻号反例"
+  sign:     (c) => `针对「${c}」，问先生：你这句话是朝一个方向的（对/错、必然/偶然、强/弱），那在稍微不一样的情形里，这个方向还成立吗？能不能举一个让方向翻过来的反例？`,
+  // 阶比较（order comparison）：你做的"谁比谁高/低阶、等价、可忽略"判断，锚定极限过程了吗？逼"换趋近方向会不会反过来 / 等价是不是就等于它"
+  order:    (c) => `针对「${c}」，问先生：你说它比另一个高阶（或可以忽略另一个），这是在朝哪个方向趋近于什么的时候才成立的？换个趋近方向，这个大小关系会反过来吗？你说它们"等价"，是不是就等于它（等价是极限比值为1，不是真的相等）？`,
+  // 极限运算法则前提（law premise）：你做极限运算时，先确认法则前提了吗？逼"未定式识别/缺前提仍套公式"
+  law:     (c) => `针对「${c}」，问先生：你这处代入/拆/套四则求极限，各子极限是不是都存在且为有限实数？分母极限是不是 ≠0（商的法则）？内极限是不是在外函数连续点（复合法则）？有没有踩到未定式（0/0、∞/∞、∞−∞…）却直接套了四则？`,
+  // 夹逼准则（squeeze / 极限存在准则Ⅰ）：三条件缺一不可——双边、两边同极限、去心邻域内处处成立
+  squeeze: (c) => `针对「${c}」，问先生：你说它落在某个范围里——上下两边都给到了吗？这两个界是不是趋近到**同一个**值（两边落到不同值就夹不住）？这个范围又是在多近的地方一直成立的？`,
+  // 柯西极限存在准则（Cauchy / 极限存在准则Ⅱ）：唯一不预设终点的判据——不看目标，只看内部差
+  cauchy:  (c) => `针对「${c}」，问先生：抛开"该怎么讲才对"不说——你这一轮的讲法，和上一轮相比差在哪？差的那部分是不是比上一次更小了，还是换了方向在原地打转？`,
 };
 // 轮次顺序：先把最"扎人"的三类放前面（反例／边界／正例），再补区分／机制／应用
-const PROBE_ORDER = ['counter', 'bound', 'example', 'distinct', 'mechanism', 'apply'];
+const PROBE_ORDER = ['counter', 'bound', 'example', 'distinct', 'mechanism', 'apply', 'sign', 'order', 'law', 'squeeze', 'cauchy'];
 // 人类回话之后，任务加一层"先接话、再探测"（让课堂是对话，不是各自朗诵）
 const FOLLOW_PREFIX = ['先回应先生刚才那句话，再', '听完先生这句，', '先生这么一说，你'];
 // 本轮该学生盯哪个要点：串开索引，保证一轮之内 K 个学生不撞车、且覆盖全篇。
@@ -299,6 +311,39 @@ const PROBE_FRAME = {
     (c) => `「${c}」这话太虚了，你能不能讲讲它**到底是怎么一回事**？`,
     (c) => `先生，我记住了「${c}」这句话，可不知道拿它干嘛、怎么用，能举个例子不？`,
     (c) => `「${c}」——那反过来，这话有没有漏的、有没有不成立的时候？`,
+  ],
+  // 保号性（sign preservation）：局部保号性 lim f=A>0 ⇒ 去心邻域内 f>A/2 的产品翻译。
+  //   你讲的"方向/符号判断"（X 是对的/必然导致 Y/优于别的东西），在邻近情形（稍微变体的例子）里
+  //   还保持这个符号吗？能不能举一个让方向整个翻过来的反例？——镜子照"伪定性断言"的专用维度。
+  sign: [
+    (c) => `「${c}」——你这句是朝一个方向的（比如"它是对的／必然的／比别的强"）。那在稍微不一样的情况里，这个方向还成立吗？`,
+    (c) => `要是有一个情形，让「${c}」整句话的方向反过来（本来"对"的变成"不对"的），你举得出来吗？`,
+    (c) => `「${c}」听起来是个确定的方向。可不可能换个相近的例子，它就翻号了？`,
+  ],
+  // 阶比较（order comparison）：你做的"谁比谁高/低阶、等价、可忽略"判断，锚定极限过程了吗？
+  //   无穷小/无穷大的阶 O/o/∼ 是偏序、且必须相对于极限过程才有意义；"等价"f∼g=lim f/g=1 但 f≠g。
+  order: [
+    (c) => `「${c}」——你说它比另一个高阶（或可以忽略另一个）。那这是在朝哪个点、哪种趋近下才成立的？换一个趋近方向，这个大小关系会不会反过来？`,
+    (c) => `「${c}」里你用到了"等价"。可"等价"是极限比值等于 1，不是真的相等——你能不能举一个它俩不相等、但极限比值是 1 的例子？`,
+    (c) => `「${c}」说 X 比 Y 小得多。可"小得多"是相对的：在朝哪个方向趋近于什么的时候才小得多？趋近别的点时会不会反过来？`,
+  ],
+  // 极限运算法则前提（law premise）：你做极限运算时，先确认法则前提了吗？逼"未定式识别/缺前提仍套公式"
+  law: [
+    (c) => `「${c}」——你这处代入/拆/套四则求极限。可各子极限是不是都存在、而且都是有限实数？要是某一处极限是 ∞，∞ 不是个数，lim(f−g) 不能写成 ∞−∞。`,
+    (c) => `「${c}」里你用了商的法则。那分母极限是不是真的不等于 0？要是分母也趋 0，那就成了 0/0，得换办法（约分/等价无穷小/洛必达），不能直接除。`,
+    (c) => `「${c}」看着像能直接套公式。可它会不会是未定式（0/0、∞/∞、∞−∞、0·∞、1^∞…）？未定式必须单独处理，不能直接套四则——你能不能先认出它是哪种？`,
+  ],
+  // 夹逼准则（squeeze / 极限存在准则Ⅰ）：三条件缺一不可
+  squeeze: [
+    (c) => `「${c}」——你给了它一个上界（或下界）。可另一边呢？只有一边那是"有界"，不是"夹逼"：−M ≤ f ≤ M 的两边收敛到 −M 和 M，不是同一个值，夹不住。`,
+    (c) => `「${c}」你把两边都说了。那这两个界是不是趋近到**同一个**值？只要两边落到不同地方，中间那个就定不下来——这正是夹逼比"有界"多出来的那一份。`,
+    (c) => `「${c}」里你给的范围，是在多近的地方一直成立的？要是只在个别点上成立、换个点就不成立了，那这个范围不算数——去心邻域得处处成立。`,
+  ],
+  // 柯西极限存在准则（Cauchy / 极限存在准则Ⅱ）：唯一不预设终点的判据
+  cauchy: [
+    (c) => `「${c}」——抛开"该怎么讲才对"不说：你这一轮的讲法，和上一轮相比差在哪？差的那部分是不是比上一次更小了？`,
+    (c) => `「${c}」如果我让你把它再讲一遍，你会讲成什么样？要是两遍之间越差越小，那它在收拢；要是越差越大或来回摆，那它还散步着。`,
+    (c) => `「${c}」不用管"正确答案是什么"——只看你自己：前后两遍的说法，距离在缩小吗？这就是柯西那两条里不管极限是哪、只看两点之差的那一条。`,
   ],
 };
 // 薄教案（口号式空话）专用提示：镜子把先生原话**原样举起来**逼落地。
@@ -1457,6 +1502,89 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
       } catch (_) { /* 不影响主线 */ }
     }
 
+    // ── 函数思想（续四）：保号性 —— 你给的方向/符号判断，在邻近情形里还保号吗 ──
+    //   局部保号性 lim f=A>0 ⇒ 去心邻域内 f>A/2；迁移到讲授 = 你的带符号断言是否经得起"翻号反例"检验。
+    //   两条证据都是【计数】：保号型探针问答数 + 你话里方向性判断的"保持范围/翻号反例"信号。不评分（守 A2）。
+    if (Array.isArray(concepts) && concepts.length) {
+      try {
+        const sp = tfn.signPreservation({ concepts, rounds: mineRounds, probes });
+        if (sp.ok) {
+          teacherReportMd += '\n\n## 你给的方向判断，在邻近情形里还保号吗（保号性）\n' + sp.line + '\n';
+          if (sp.note) teacherReportMd += `〔${sp.note}〕\n`;
+        }
+      } catch (_) { /* 不影响主线 */ }
+    }
+
+    // ── 函数思想（续五）：阶比较 —— 你做的"谁比谁高/低阶、等价、可忽略"判断，锚定极限过程了吗 ──
+    //   阶 O/o/∼ 是偏序、且必须相对于极限过程才有意义；"等价"f∼g=lim f/g=1 但 f≠g（经典误区）。
+    //   两条证据都是【计数】：阶比型探针问答数 + 你话里阶判断的"极限过程锚定/等价≠相等"信号。不评分（守 A2）。
+    if (Array.isArray(concepts) && concepts.length) {
+      try {
+        const oc = tfn.orderComparison({ concepts, rounds: mineRounds, probes });
+        if (oc.ok) {
+          teacherReportMd += '\n\n## 你做的阶比较，锚定极限过程了吗（阶比较）\n' + oc.line + '\n';
+          if (oc.note) teacherReportMd += `〔${oc.note}〕\n`;
+        }
+      } catch (_) { /* 不影响主线 */ }
+    }
+
+    // ── 函数思想（续六）：极限运算法则前提 ── 你做极限运算时，先确认法则前提了吗 ──
+    //   极限运算法则前提"各子极限存在且有限"（Freek Wiedijk HOL LIM_ADD；Eberl Isabelle tendsto_intros；
+    //   商的法则分母≠0 = 局部保号性推论；未定式处理 = orderComparison 阶比较）。
+    //   两条证据都是【计数】：法则前提型探针问答数 + 你话里运算表述的"前提确认/未定式误区"信号。不评分（守 A2）。
+    if (Array.isArray(concepts) && concepts.length) {
+      try {
+        const lp = tfn.lawPremise({ concepts, rounds: mineRounds, probes });
+        if (lp.ok) {
+          teacherReportMd += '\n\n## 你做极限运算时，先确认法则前提了吗（运算法则）\n' + lp.line + '\n';
+          if (lp.note) teacherReportMd += `〔${lp.note}〕\n`;
+        }
+      } catch (_) { /* 不影响主线 */ }
+    }
+
+    // ── 函数思想（续七）：夹逼准则（极限存在准则Ⅰ）── 你给的范围断言，三个条件齐了吗 ──
+    //   去心邻域内 g≤f≤h 处处成立 且 lim g = lim h = 同一个 A ⇒ lim f = A，三条件缺一不可。
+    //   与已有算子咬合：局部有界性＝只夹一边的弱化版；保号性＝用两个常数界夹逼的特例。计数不评分（守 A2）。
+    if (Array.isArray(concepts) && concepts.length) {
+      try {
+        const sq = tfn.squeezeBounds({ concepts, rounds: mineRounds, probes });
+        if (sq.ok) {
+          teacherReportMd += '\n\n## 你给的范围断言，夹逼三条件齐了吗（夹逼准则）\n' + sq.line + '\n';
+          if (sq.note) teacherReportMd += `〔${sq.note}〕\n`;
+        }
+      } catch (_) { /* 不影响主线 */ }
+    }
+
+    // ── 函数思想（续八）：柯西极限存在准则（极限存在准则Ⅱ）── 你和上一轮的自己，差得越来越小了吗 ──
+    //   整套算子里唯一一条【不预设终点】的判据：只看相邻表述的内部差，不预设"该怎么讲才对"。
+    //   与 A2（镜子不评分）在数学上精确对应——柯西只判"极限存在"，不给出极限是什么。计数不评分。
+    if (Array.isArray(concepts) && concepts.length) {
+      try {
+        const cy = tfn.cauchyConvergence({ concepts, rounds: mineRounds, probes });
+        if (cy.ok) {
+          teacherReportMd += '\n\n## 你和上一轮的自己，差得越来越小了吗（柯西准则）\n' + cy.line + '\n';
+          if (cy.note) teacherReportMd += `〔${cy.note}〕\n`;
+        }
+      } catch (_) { /* 不影响主线 */ }
+    }
+
+    // ── 认知收敛判据：保号性(局部) + 去心邻域 + Heine(全局) 合成 ──
+    //   你从不同方法/角度讲的，最终是否收同一个理解（极限）= 认知收敛。
+    //   局部=保号性(signPreservation.notPreserved 空)；全局=Heine 可观测版(各探测角度
+    //   回答序列收同一概念签名集)；收敛核=greatestFixedPoint(末尾 K 轮持续在场的概念)。
+    //   去心邻域=只认证趋近稳定，从不声称你"踩上"洞察点。不评分（守 A2）。
+    if (Array.isArray(concepts) && concepts.length && Array.isArray(mineRounds) && mineRounds.length >= 2) {
+      try {
+        const ccRes = cc.cognitiveConvergence({ concepts, rounds: mineRounds, probes });
+        if (ccRes.ok) {
+          teacherReportMd += '\n\n## 你的理解，收敛了吗（认知收敛判据）\n' + ccRes.line + '\n';
+          if (ccRes.note) teacherReportMd += `〔${ccRes.note}〕\n`;
+        } else if (ccRes.verdict === 'unknown') {
+          teacherReportMd += '\n\n## 你的理解，收敛了吗（认知收敛判据）\n' + ccRes.line + '\n';
+        }
+      } catch (_) { /* 不影响主线 */ }
+    }
+
     // ── 函数思想（续三）：三种表示互校 —— 解析式 / 图像 / 表格 ──
     //   函数独有（映射不强调三种表示）。缺"表格"这个仲裁者时，定义与例子一旦冲突
     //   （Vinner & Dreyfus：意象 ≠ 定义）就没有能裁决的东西。只在【真的缺】时出声。
@@ -1490,6 +1618,15 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
       teacherGainFile = path.join(dir, `${base}-我的收获.md`);
       fs.writeFileSync(teacherGainFile, teacherReportMd, 'utf-8');
       onLog(`《我的收获》（教中学反馈）已写出 → ${teacherGainFile}`);
+      // 《我的收获》图表版：图文同步的 HTML（认知收敛/保号性/映射网/伽罗瓦盲区），据本课真实数据生成
+      try {
+        const htmlFile = path.join(dir, `${base}-我的收获.html`);
+        fs.writeFileSync(htmlFile, rd.renderHtmlReport({
+          title: lessonTitle, teacherReportMd,
+          result: { concepts, probes, rounds, mineRounds },
+        }), 'utf-8');
+        onLog(`《我的收获》（图表版）已写出 → ${htmlFile}`);
+      } catch (he) { onLog(`《我的收获》图表版生成失败（不阻塞课堂）：${String((he && he.message) || he)}`); }
       // 世界对象本身持久化（R-M2 修复：world.save 原语已落，此处接入会话生命周期）
       worldPath = path.join(dir, `${base}-world.json`);
       try { w.save(worldPath); onLog(`世界状态已持久化 → ${worldPath}（T=${w.T}）`); }
@@ -1551,7 +1688,7 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
     const result = {
       lessonTitle, lessonText, concepts, difficulties,
       students: students.map((s) => ({ name: s.name, trait: s.trait, alpha: s.alpha, voice: s.voice, catch: s.catch, mis: s.mis, probeType: s.probeType })),
-      rounds, lessons, notes, artifacts: lessons + notes,
+      rounds, mineRounds, lessons, notes, artifacts: lessons + notes,
       worldPath, worldT: w.T,
       coverage: gains.coverage, uncovered: gains.uncovered,
       conceptEntropy: gains.conceptEntropy, conceptEntropyMax: gains.conceptEntropyMax,

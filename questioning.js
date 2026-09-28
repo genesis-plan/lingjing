@@ -52,6 +52,11 @@ const PROBE_TO_LEVEL = {
   bound:     'hypothesis',
   counter:   'counterexample',
   apply:     'hypothesis', // 应用新场景 = 边界思考
+  sign:     'sign-preserving', // 保号性：方向/符号判断在邻近情形是否保持（翻号反例）
+  order:    'hypothesis',      // 阶比较：谁比谁高/低阶/等价，是否锚定极限过程（换趋近方向会不会反过来）
+  law:      'hypothesis',      // 极限运算法则前提：做极限运算时是否先确认各子极限存在有限/分母≠0/连续点/未定式
+  squeeze:  'sign-preserving', // 夹逼准则（极限存在准则Ⅰ）：范围断言双边齐吗、两边落到同一个极限吗、在去心邻域内处处成立吗
+  cauchy:   'cause',           // 柯西准则（极限存在准则Ⅱ）：相邻表述的内部差在收缩吗——唯一不预设终点的判据
 };
 
 // ---- 双轨提问模板库 ----
@@ -218,6 +223,11 @@ const PRIOR_ANSWERS = {
   counter:      0.40, // "有没有反例" —— 经常举不出来，举不出来本身就是信息
   hypothesis:   0.50, // 边界假设
   land:         0.70, // 薄教案：把原话举起来逼落地，多半会补具体事例
+  sign:         0.50, // "方向在邻近例子里还保号吗"——多半会给范围或举翻号反例
+  order:        0.50, // "这个阶关系在什么极限过程下才成立"——多半会给趋近点/举翻例
+  law:          0.50, // "这处运算的法则前提成不成立"——多半会给前提/举未定式反例
+  squeeze:      0.50, // "这两个界是不是夹到同一个地方"——多半会补另一边或给出共同极限
+  cauchy:       0.50, // "你和上一轮的自己差在哪"——多半会重述或细化，差额即可观��
 };
 
 // 二元熵 H_b(p)，p∈[0,1]
@@ -354,7 +364,7 @@ module.exports = {
   PROBE_TO_LEVEL,
   stableHash, mirrorAnchor, inferResponseMode, calibrateLevel, pickStance,
   buildQuestionSpec, renderWpHint,
-  tokenize, estimateGain, shouldContinue, enforceSingleFocus, planNextProbe,
+  tokenize, charNgrams, estimateGain, shouldContinue, enforceSingleFocus, planNextProbe,
   // EIG 选问（信息调度，替代轮转调度）
   CHANNEL_NOISE, PRIOR_ANSWERS, bernoulliEntropy, eigOf, adjustedEig, pickByEig,
 };

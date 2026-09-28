@@ -151,7 +151,7 @@ section('留白拍不产出探测记录');
     await s.reply(replies[i++ % replies.length], () => {}, () => {});
   }
   await s.finish(() => {}, () => {});
-  ok(s.probes.every((p) => p.type === 'land' || ['counter', 'bound', 'example', 'distinct', 'mechanism', 'apply'].includes(p.type)),
+  ok(s.probes.every((p) => p.type === 'land' || ['counter', 'bound', 'example', 'distinct', 'mechanism', 'apply', 'sign', 'order', 'law', 'squeeze', 'cauchy'].includes(p.type)),
     'probes 序列里干净：没有 reflect 混进去');
   ok(s.probes.length === 0 || s.probes.every((p) => !/「/.test(p.type)), '类型字段未被 reflect 污染');
 }

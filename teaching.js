@@ -312,6 +312,16 @@ const PROBE_TYPES = [
   // 2026-09-18 加：薄教案（口号式空话）专用。镜子把先生原话**原样举起来**逼落地——
   // 问"这到底什么意思／拿件具体的事说明白"，而不是装作有现成概念可探。
   { key: 'land',      label: '落地',   hint: '把你听到的话原样举起来：这到底什么意思？拿一件具体的事说明白' },
+  // 2026-09-28 加：保号性（sign preservation）。你给的方向/符号判断，在邻近情形里还保号吗？逼"翻号反例"。
+  { key: 'sign',      label: '保号',   hint: '你这句话朝一个方向（对/错、必然/偶然、强/弱），在稍微不一样的情形里还成立吗？能不能举翻号的例子？' },
+  // 2026-09-28 加：阶比较（order comparison）。你做的"谁比谁高/低阶、等价、可忽略"判断，锚定极限过程了吗？逼"换趋近方向会不会反过来 / 等价是不是就等于它"。
+  { key: 'order',     label: '阶比',   hint: '你说 X 比 Y 高阶（或可以忽略 Y），这是在朝哪个方向趋近于什么的时候才成立的？换个趋近方向，这个大小关系会反过来吗？等价是不是就等于它？' },
+  // 2026-09-28 加：极限运算法则前提（law premise）。你做极限运算时，先确认"各子极限存在且有限、分母≠0、连续点、根下符号"了吗？逼"未定式识别/缺前提仍套公式"。
+  { key: 'law',      label: '前提',   hint: '你这处代入/拆/套四则求极限，各子极限是不是都存在且有限？分母极限是不是 ≠0？是不是踩到了未定式（0/0、∞/∞、∞−∞…）？' },
+  // 2026-09-28 加：夹逼准则（squeeze / 极限存在准则Ⅰ）。你给的范围断言三个条件齐了吗？逼"另一边呢 / 两边是不是落到同一个值 / 在哪个去心邻域内处处成立"。
+  { key: 'squeeze',  label: '夹逼',   hint: '你说它不超过某个值（或至少是某个值）——另一边呢？这两个界是不是趋近到同一个值？这个范围在什么样的邻近范围里一直成立？' },
+  // 2026-09-28 加：柯西极限存在准则（Cauchy / 极限存在准则Ⅱ）。唯一一条不预设终点的判据——不看目标，只看你和上一轮的自己差得越来越小了吗。
+  { key: 'cauchy',   label: '柯西',   hint: '你这一轮的讲法，和上一轮相比差在哪？差的部分是不是比上一次更小了——还是换了方向在原地打转？' },
 ];
 const PROBE_LABELS = PROBE_TYPES.map((p) => p.label);
 const PROBE_RE = [
@@ -335,7 +345,7 @@ function probeLabel(key) {
 }
 // 本课探测构成：**计数**，不是分数。回答"这一课，学生把你往哪些方向逼了"
 function probeCounts(probes) {
-  const out = { counter: 0, bound: 0, example: 0, distinct: 0, mechanism: 0, apply: 0, land: 0, unknown: 0 };
+  const out = { counter: 0, bound: 0, example: 0, distinct: 0, mechanism: 0, apply: 0, land: 0, order: 0, law: 0, squeeze: 0, cauchy: 0, unknown: 0 };
   for (const p of probes || []) {
     const k = p && p.type;
     if (k && out[k] != null) out[k]++; else out.unknown++;
