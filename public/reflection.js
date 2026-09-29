@@ -60,7 +60,7 @@ function stableId(name, block, i) {
   return name + '::' + block + '::' + i;
 }
 function probeLabel(t) {
-  return ({ counter: '反例', bound: '边界', example: '正例', distinct: '区分', mechanism: '机制', apply: '应用', sign: '保号', order: '阶比', law: '前提', squeeze: '夹逼', cauchy: '柯西' })[t] || '探测';
+  return ({ counter: '反例', bound: '边界', example: '正例', distinct: '区分', mechanism: '机制', apply: '应用', sign: '保号', order: '阶比', law: '前提', squeeze: '夹逼', cauchy: '柯西', gap: '鸿沟', extend: '延拓' })[t] || '探测';
 }
 function noEval(text) {
   return !EVAL_RE.test(String(text || ''));

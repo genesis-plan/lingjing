@@ -67,7 +67,7 @@ ok.push(['纪要已落盘', !!r.minutes.path && fs.existsSync(r.minutes.path)]);
 ok.push(['镜子在会话中抛出探测', seenProbes.length >= 1, seenProbes.length + ' 枚']);
 ok.push(['每枚探测都带类型', seenProbes.every((p) => !!p.type),
   [...new Set(seenProbes.map((p) => p.type))].join('/')]);
-ok.push(['探测类型合法（十二类之内）', seenProbes.every((p) => ['counter','bound','example','distinct','mechanism','apply','land','sign','order','law','squeeze','cauchy'].includes(p.type)),
+ok.push(['探测类型合法（十四类之内）', seenProbes.every((p) => ['counter','bound','example','distinct','mechanism','apply','land','sign','order','law','squeeze','cauchy','gap','extend'].includes(p.type)),
   [...new Set(seenProbes.map((p) => p.type))].join('/')]);
 ok.push(['probes 与事件流一致', (r.probes || []).length === seenProbes.length,
   (r.probes || []).length + ' vs ' + seenProbes.length]);

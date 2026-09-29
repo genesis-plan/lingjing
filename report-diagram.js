@@ -42,18 +42,49 @@ function esc(s) {
 }
 
 // ── 从会话数据重建"概念-概念"邻接（共现：同轮回复 / 同探针 say+answer 都提到两个概念）──
+//
+// 2026-09-29 修（真缺陷，由分享卡样例暴露）：
+//   原实现只做**完整字符串包含**。但真人说话说的是"夹逼""柯西"，概念表里写的是"夹逼准则""柯西准则"
+//   ⇒ 匹配不上 ⇒ 邻接矩阵全空 ⇒ 映射网、盲区图在一次正常会话里其实是**空的**（图上没一条边）。
+//   两处改动：
+//   ① 口语命中：允许"概念去掉通用后缀后的核心词"命中（说"柯西"＝说到"柯西准则"）；
+//   ② 相邻两轮连边：会话里接着上一句讲，就是在讲同一件事——这是"已经连上"的最低门槛。
+//      只靠同句共现太严：真人一句话通常只提一个概念，图上永远没边。
+
+const CONCEPT_SUFFIX = ['准则', '定理', '定律', '性质', '法则', '原则', '推论', '定义', '公式', '定则'];
+
+function coreOf(c) {
+  const s = String(c);
+  for (const suf of CONCEPT_SUFFIX) {
+    if (s.length > suf.length + 1 && s.endsWith(suf)) return s.slice(0, -suf.length);
+  }
+  return s;
+}
+
+function mentions(text, c) {
+  const t = String(text || '');
+  if (t.indexOf(c) >= 0) return true;
+  const core = coreOf(c);
+  return core.length >= 2 && t.indexOf(core) >= 0;
+}
+
 function conceptAdjacency(result) {
   const cs = (result.concepts || []).map(String);
   const idx = new Map(cs.map((c, i) => [c, i]));
   const adj = cs.map(() => new Set());
   const link = (a, b) => { if (a !== b && idx.has(a) && idx.has(b)) { adj[idx.get(a)].add(idx.get(b)); adj[idx.get(b)].add(idx.get(a)); } };
+  const perRound = [];
   for (const r of (result.rounds || [])) {
-    const present = cs.filter((c) => String(r.text || '').indexOf(c) >= 0);
+    const present = cs.filter((c) => mentions(r.text, c));
     for (let i = 0; i < present.length; i++) for (let j = 0; j < present.length; j++) link(present[i], present[j]);
+    perRound.push(present);
+  }
+  for (let k = 1; k < perRound.length; k++) {
+    for (const a of perRound[k - 1]) for (const b of perRound[k]) link(a, b);
   }
   for (const p of (result.probes || [])) {
     const text = String(p.say || '') + '\n' + String(p.answer || '');
-    const present = cs.filter((c) => text.indexOf(c) >= 0);
+    const present = cs.filter((c) => mentions(text, c));
     for (let i = 0; i < present.length; i++) for (let j = 0; j < present.length; j++) link(present[i], present[j]);
   }
   return adj;

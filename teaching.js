@@ -322,6 +322,12 @@ const PROBE_TYPES = [
   { key: 'squeeze',  label: '夹逼',   hint: '你说它不超过某个值（或至少是某个值）——另一边呢？这两个界是不是趋近到同一个值？这个范围在什么样的邻近范围里一直成立？' },
   // 2026-09-28 加：柯西极限存在准则（Cauchy / 极限存在准则Ⅱ）。唯一一条不预设终点的判据——不看目标，只看你和上一轮的自己差得越来越小了吗。
   { key: 'cauchy',   label: '柯西',   hint: '你这一轮的讲法，和上一轮相比差在哪？差的部分是不是比上一次更小了——还是换了方向在原地打转？' },
+  // 2026-09-29 加：归纳鸿沟（黎曼已证事实的教学面）。例子支撑的是信心，不是结构——
+  // 黎曼猜想的零点已数以万亿计逐个验证、无一反例，它至今仍是猜想。"我验了 N 个都对"填不上"例子 → 全体"那道缝。
+  { key: 'gap',      label: '鸿沟',   hint: '你验过的例子都成立——可从"这些例子都对"跳到"所以它成立"，中间那一步是靠什么保证的？' },
+  // 2026-09-29 加：延拓唯一（解析延拓恒等定理，已证）。说"广义的X/推广"时，新旧地盘的判据是不是同一个——
+  // 延拓若存在必唯一；判据没说清沿用，可能不是推广，是偷换概念。
+  { key: 'extend',   label: '延拓',   hint: '你说的"广义的X／推广到更一般的情形"——新地盘上沿用的是哪条判据？它和原来那条是同一个吗？' },
 ];
 const PROBE_LABELS = PROBE_TYPES.map((p) => p.label);
 const PROBE_RE = [
@@ -345,7 +351,7 @@ function probeLabel(key) {
 }
 // 本课探测构成：**计数**，不是分数。回答"这一课，学生把你往哪些方向逼了"
 function probeCounts(probes) {
-  const out = { counter: 0, bound: 0, example: 0, distinct: 0, mechanism: 0, apply: 0, land: 0, order: 0, law: 0, squeeze: 0, cauchy: 0, unknown: 0 };
+  const out = { counter: 0, bound: 0, example: 0, distinct: 0, mechanism: 0, apply: 0, land: 0, order: 0, law: 0, squeeze: 0, cauchy: 0, gap: 0, extend: 0, unknown: 0 };
   for (const p of probes || []) {
     const k = p && p.type;
     if (k && out[k] != null) out[k]++; else out.unknown++;

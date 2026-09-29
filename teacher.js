@@ -65,6 +65,7 @@ const yon = require('./yoneda.js');   // 米田引理：关系剖面=概念身�
 const tfn = require('./teachingfn.js'); // 讲授作为函数：可逆性/跨时段/有界性/三种表示（复用 function.js 的 invertibility + funext，2026-09-26 落）
 const cc = require('./cognitive-convergence.js'); // 认知收敛判据：保号性+去心邻域+Heine 合成（2026-09-28 落）
 const rd = require('./report-diagram.js'); // 《我的收获》图表化：认知收敛/保号性/映射网/伽罗瓦盲区（2026-09-28 落）
+const sc = require('./share-card.js');     // 分享卡：把一次对话变成一件**可以带走**的东西（2026-09-29 落，见下注释）
 const tsk = require('./tarski.js');   // Knaster–Tarski：不动点的定理保证 + 有限格上的迭代上界（2026-09-25 落）
 const gal = require('./galois.js');   // 伽罗瓦连接：镜子本体，盲区=所说≠闭包（2026-09-27 落）
 const coal = require('./coalgebra.js'); // 余代数/互模拟：无限讲授=余归纳流；条条大道通罗马=gfp（2026-09-27 落）
@@ -189,9 +190,13 @@ const PROBE_ROLES = {
   squeeze: (c) => `针对「${c}」，问先生：你说它落在某个范围里——上下两边都给到了吗？这两个界是不是趋近到**同一个**值（两边落到不同值就夹不住）？这个范围又是在多近的地方一直成立的？`,
   // 柯西极限存在准则（Cauchy / 极限存在准则Ⅱ）：唯一不预设终点的判据——不看目标，只看内部差
   cauchy:  (c) => `针对「${c}」，问先生：抛开"该怎么讲才对"不说——你这一轮的讲法，和上一轮相比差在哪？差的那部分是不是比上一次更小了，还是换了方向在原地打转？`,
+  // 归纳鸿沟（黎曼已证事实的教学面）：例子支撑的是信心，不是结构——万亿零点逐个验证仍是猜想
+  gap:     (c) => `针对「${c}」，问先生：你验过的例子都对——可从"例子都对"跳到"所以它成立"，中间那一步是靠什么保证的？这一步给出过证明吗，还是只是例子撑着的信心？`,
+  // 延拓唯一（解析延拓恒等定理，已证）：推广若成立，新旧域的判据必须是同一个
+  extend:  (c) => `针对「${c}」，问先生：你说的"广义的X／推广"——搬到新地盘之后，沿用的是哪条判据？这条判据和原来的那条是同一个吗，还是悄悄换了一条？`,
 };
 // 轮次顺序：先把最"扎人"的三类放前面（反例／边界／正例），再补区分／机制／应用
-const PROBE_ORDER = ['counter', 'bound', 'example', 'distinct', 'mechanism', 'apply', 'sign', 'order', 'law', 'squeeze', 'cauchy'];
+const PROBE_ORDER = ['counter', 'bound', 'example', 'distinct', 'mechanism', 'apply', 'sign', 'order', 'law', 'squeeze', 'cauchy', 'gap', 'extend'];
 // 人类回话之后，任务加一层"先接话、再探测"（让课堂是对话，不是各自朗诵）
 const FOLLOW_PREFIX = ['先回应先生刚才那句话，再', '听完先生这句，', '先生这么一说，你'];
 // 本轮该学生盯哪个要点：串开索引，保证一轮之内 K 个学生不撞车、且覆盖全篇。
@@ -216,7 +221,9 @@ function probeTarget(concepts, k, round) {
 //      （bound → apply → bound → apply → …），澄清/举例/机制这几层一次都轮不到。
 //    而本产品的探测本来就是分层认知操作（澄清→举例→因果→假设→反例→元认知），
 //    只问"边界/应用"等于把最值钱的分层能力弄丢了。所以加一层**覆盖优先**约束：
-//    ① 前 coverRounds 轮，先把本场还没照到的类放进候选池（保证六类都被照一次）；
+//    ① 前 coverRounds 轮，先把本场还没照到的类放进候选池（保证全部 13 类都被照一次；
+//       2026-09-29 修：名单从 6 类长到 13 类后，coverRounds=6 的旧默认让末位类型永远轮不到，
+//       且会话层曾只传最近 4 枚当 recentTypes——"本场没照到"退化成"最近没照到"。两处都改回设计意图）。
 //    ② 候选池内部再按 EIG 挑最高的。分层覆盖是骨架，EIG 只做池内优选。
 //
 // ⚠️ 适用边界（别把 EIG 当万能钥匙）：EIG 最大化的是"这枚问句能消除多少不确定性"，
@@ -224,7 +231,7 @@ function probeTarget(concepts, k, round) {
 //    它基础 EIG 最低（p_t=0.9，人必然答），可恰恰是"人以为自己懂了、其实混淆了两个概念"的**高发区**。
 //    纯 EIG 会几乎永不优先问它。所以分层覆盖约束必须保留：EIG 只决定池内顺序，不决定要不要照到。
 //    一句话：EIG 管"问哪一枚更值"，不管"哪些层面必须被照到"。
-function probeKind(k, round, { responseMode = null, recentTypes = [], coverRounds = 6 } = {}) {
+function probeKind(k, round, { responseMode = null, recentTypes = [], coverRounds = PROBE_ORDER.length } = {}) {
   const n = PROBE_ORDER.length;
   const seen = new Set(recentTypes.filter(Boolean));
   const unseen = PROBE_ORDER.filter((t) => !seen.has(t));
@@ -344,6 +351,18 @@ const PROBE_FRAME = {
     (c) => `「${c}」——抛开"该怎么讲才对"不说：你这一轮的讲法，和上一轮相比差在哪？差的那部分是不是比上一次更小了？`,
     (c) => `「${c}」如果我让你把它再讲一遍，你会讲成什么样？要是两遍之间越差越小，那它在收拢；要是越差越大或来回摆，那它还散步着。`,
     (c) => `「${c}」不用管"正确答案是什么"——只看你自己：前后两遍的说法，距离在缩小吗？这就是柯西那两条里不管极限是哪、只看两点之差的那一条。`,
+  ],
+  // 归纳鸿沟（黎曼已证事实的教学面）：例子支撑的是信心，不是结构
+  gap: [
+    (c) => `「${c}」——你验过的例子都对。可从"例子都对"到"所以它成立"，中间那一步是靠什么保证的？`,
+    (c) => `「${c}」要是明天遇到一个没验过的情况，你凭什么说它也成立？这一步给过证明吗，还是只是例子撑着的信心？`,
+    (c) => `「${c}」例子再多也数不完全体——万一第一个反例就藏在没验过的地方呢？到那时前面所有的"都对"还作数吗？`,
+  ],
+  // 延拓唯一（解析延拓恒等定理，已证）：推广若成立，新旧域的判据必须是同一个
+  extend: [
+    (c) => `「${c}」——你说它推广到更一般的情形也成立。那新地盘上沿用的是哪条判据？还是原来那条吗？`,
+    (c) => `「${c}」的"广义"版本——它凭什么还算同一个东西？判据没换的话是哪条，换的话那还叫推广吗？`,
+    (c) => `「${c}」搬到新地盘之后，原来的条件要是有一条不满足了——那它是推广，还是其实换了个别的概念？`,
   ],
 };
 // 薄教案（口号式空话）专用提示：镜子把先生原话**原样举起来**逼落地。
@@ -825,7 +844,9 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
         //   responseMode = 老师这一轮的作答状态，答得流畅/卡住都会调低该方向的 EIG。
         kind = probeKind(k, round, {
           responseMode: inferResponseMode(teacherReply),
-          recentTypes: probes.slice(-4).map((p) => p.type),
+          // 2026-09-29 修：传全场类型（非最近4枚）——"本场还没照到的类"是全场语义，
+          // 传短窗会让 13 类名单里末位的类型（如 gap/extend）永远进不了覆盖池。
+          recentTypes: probes.map((p) => p.type),
         });
         targetIdx = (((k + round - 1) % Math.max(1, concepts.length)) + Math.max(1, concepts.length)) % Math.max(1, concepts.length);
         const spec = buildQuestionSpec({
@@ -1568,6 +1589,33 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
       } catch (_) { /* 不影响主线 */ }
     }
 
+    // ── 函数思想（续九）：归纳鸿沟（黎曼已证事实的教学面）── "例子都对"到"所以成立"，中间那步靠什么 ──
+    //   黎曼猜想的零点已数以万亿计逐个验证、无一反例，它至今仍是猜想——例子支撑的是信心，不是结构。
+    //   红线：只用"已证的事实"（数值验证不构成证明，这个元事实已证），猜想本体不进产品逻辑。
+    //   只在有信号（例子跳全体的话术 / 鸿沟型探测）时出声，不在每份报告里刷存在感。计数不评分（守 A2）。
+    if (Array.isArray(concepts) && concepts.length) {
+      try {
+        const ig = tfn.inductionGap({ concepts, rounds: mineRounds, probes });
+        if (ig.ok && (ig.exampleClaims.length || ig.gapAsked > 0)) {
+          teacherReportMd += '\n\n## 从"例子都对"到"所以成立"，中间那步靠什么（归纳鸿沟）\n' + ig.line + '\n';
+          if (ig.note) teacherReportMd += `〔${ig.note}〕\n`;
+        }
+      } catch (_) { /* 不影响主线 */ }
+    }
+
+    // ── 函数思想（续十）：延拓唯一（解析延拓恒等定理，已证）── 推广若成立，新旧域判据必须是同一个 ──
+    //   恒等定理：同一解析函数，延拓若存在则必唯一——新旧地盘取值不同的"两个延拓"不可能同时成立。
+    //   故"广义的X"若与旧判据冲突，不是延拓，是偷换概念。只照"判据是否被说清沿用"，不判推广对错（守 A2）。
+    if (Array.isArray(concepts) && concepts.length) {
+      try {
+        const ct = tfn.continuation({ concepts, rounds: mineRounds, probes });
+        if (ct.ok && (ct.extendTalks.length || ct.extendAsked > 0)) {
+          teacherReportMd += '\n\n## 你说"广义的X／推广"时，判据说清了吗（延拓唯一）\n' + ct.line + '\n';
+          if (ct.note) teacherReportMd += `〔${ct.note}〕\n`;
+        }
+      } catch (_) { /* 不影响主线 */ }
+    }
+
     // ── 认知收敛判据：保号性(局部) + 去心邻域 + Heine(全局) 合成 ──
     //   你从不同方法/角度讲的，最终是否收同一个理解（极限）= 认知收敛。
     //   局部=保号性(signPreservation.notPreserved 空)；全局=Heine 可观测版(各探测角度
@@ -1627,6 +1675,20 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
         }), 'utf-8');
         onLog(`《我的收获》（图表版）已写出 → ${htmlFile}`);
       } catch (he) { onLog(`《我的收获》图表版生成失败（不阻塞课堂）：${String((he && he.message) || he)}`); }
+      // 分享卡：把这一课变成一件**可以带走、可以发出去**的东西。
+      // 为什么要这步（产品层，不是排版层）：要求学习者"对着 AI 暴露无知"成本高到多数人放弃
+      // （Khanmigo 两年 RCT：中位学生只在约 1/3 练习日发消息，仅 14.5% 的消息含真正推理）。
+      // 所以给一个"有回报的出口"：讲完带走一张图 + 一个问题。卡上只有计数没有分数，守 A2。
+      try {
+        const cardFile = path.join(dir, `${base}-今天那面镜子.html`);
+        fs.writeFileSync(cardFile, sc.renderShareCardHtml({
+          lessonTitle,
+          result: { concepts, probes, rounds, mineRounds, uncovered: (gains && gains.uncovered) || [] },
+          date: new Date().toISOString().slice(0, 10),
+          filename: `${base}-今天那面镜子.svg`,
+        }), 'utf-8');
+        onLog(`《今天那面镜子》（分享卡，可直接保存/转发）已写出 → ${cardFile}`);
+      } catch (ce) { onLog(`分享卡生成失败（不阻塞课堂）：${String((ce && ce.message) || ce)}`); }
       // 世界对象本身持久化（R-M2 修复：world.save 原语已落，此处接入会话生命周期）
       worldPath = path.join(dir, `${base}-world.json`);
       try { w.save(worldPath); onLog(`世界状态已持久化 → ${worldPath}（T=${w.T}）`); }

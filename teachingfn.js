@@ -751,4 +751,111 @@ function cauchyConvergence(o = {}, opts = {}) {
   return { ok: true, gaps, internalConvergence, contracting, cauchyAsked, cauchyAnswered, line, note };
 }
 
-module.exports = { buildAnswerFunction, answerFunctionShift, boundedness, representations, signPreservation, orderComparison, lawPremise, squeezeBounds, cauchyConvergence, sigOf, BOUND_CUES };
+// ════════════════════════════════════════════════════════════════════════
+// inductionGap：归纳鸿沟——"我验了 N 个都对"填不上"例子 → 全体"这道缝。
+// 数学根（已证的事实，不是猜想）：黎曼猜想经数值验证的零点数以万亿计、无一例外，
+// 但它至今仍是猜想。例子支撑的是信心，不是结构。这是学习者第一大误区，
+// 也是本产品哲学（A2 不评分、柯西不预设终点）的同族边界。
+// 守 A2：只数"你几次把例子当成了证明"，不评判例子举得好不好。
+// ════════════════════════════════════════════════════════════════════════
+
+// 例子动作词：做了一次次"个例验证"
+const GAP_EXAMPLE_CUES = ['试', '验', '检验', '验证', '举例', '带进去', '代入', '算过', '跑了', '测了', '枚举'];
+// 归纳推断词：从个例跳到全体（必须是强信号词，避免误报）
+const GAP_INFERENCE_CUES = [
+  '都成立', '都对', '都符合', '都对得上', '每次都', '回回', '次次',
+  '没有反例', '没遇到反例', '没发现反例', '从没错', '从没错过', '不会错', '从没出过错',
+  '所以一定', '所以肯定', '必然', '肯定成立', '肯定对', '一定成立', '肯定都对', '总是成立',
+];
+
+function inductionGap(o = {}) {
+  const rounds = Array.isArray(o.rounds) ? o.rounds : [];
+  const probes = Array.isArray(o.probes) ? o.probes : [];
+  const cs = (o.concepts || []).map(String);
+  const exampleClaims = [];   // 同时踩了"例子动作"与"归纳推断"的句子（归纳鸿沟所在）
+  for (const r of rounds) {
+    const text = String(r.text || '');
+    for (const sent of text.split(/[。；;！!？?\n]/)) {
+      const s = sent.trim();
+      if (s.length < 6) continue;
+      const hasExample = GAP_EXAMPLE_CUES.some((w) => s.indexOf(w) >= 0);
+      const hasInference = GAP_INFERENCE_CUES.some((w) => s.indexOf(w) >= 0);
+      if (hasExample && hasInference) {
+        exampleClaims.push({ concept: cs.find((c) => s.indexOf(c) >= 0) || null, sentence: s.slice(0, 40) });
+      }
+    }
+  }
+  const gapAsked = probes.filter((p) => p && p.type === 'gap').length;
+  const gapAnswered = probes.filter((p) => p && p.type === 'gap' && p.answer).length;
+
+  const line = exampleClaims.length
+    ? `有 ${exampleClaims.length} 处，你从"验过的例子"直接跳到了"所以成立"：` +
+      exampleClaims.map((g) => `「${g.sentence}」`).join('、') + `。` +
+      `**例子支撑的是信心，不是结构**——黎曼猜想的零点已数以万亿计地逐个验证、无一反例，` +
+      `它至今仍是猜想。你的归纳，缺口在哪一步？`
+    : `这一段没发现"例子直接当证明"的说法。注意：这是说没有这个**信号**，不是说你的论证都严密了——` +
+      `别的缝隙要靠别的算子照。`;
+
+  const note =
+    `诚实边界：① 词面信号近似（无 LLM 时的可解释近似），"归纳"没被字面说出时可能漏检；` +
+    `② 本算子**不否定举例**——举例是好习惯，被照出的只是"从个例跳到全体"的那一步；` +
+    `③ 数学根是"已证的事实"而非猜想本身：万亿级数值验证依然不构成证明，这正是归纳鸿沟的量级示范。`;
+
+  return { ok: true, exampleClaims, gapAsked, gapAnswered, line, note };
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// continuation：延拓唯一——推广若成立，新旧域的判据必须是同一个。
+// 数学根（已证）：解析延拓的恒等定理——同一个解析函数，延拓若存在则必唯一；
+// 旧域上取值不同的"两个延拓"不可能同时成立。故"广义的 X"若与 X 的旧判据冲突，
+// 那不是延拓，是偷换概念。与 distinct（区分两个东西）不重叠：
+// distinct 管"两个东西差在哪"，continuation 管"同一个东西换了地盘还认不认得出"。
+// 守 A2：只数"几次延拓、几次锚定了判据"，不评判推广对不对。
+// ════════════════════════════════════════════════════════════════════════
+
+// 延拓话语：把概念搬到新地盘
+const CONT_EXTENSION_CUES = ['广义', '推广', '扩展到', '延伸到', '一般化', '泛化', '这也算', '也算', '扩充', '放到更一般'];
+// 判据锚定词：说清了新旧地盘共用什么判据/条件
+const CONT_ANCHOR_CUES = ['判据', '标准', '定义', '条件', '前提', '同样适用', '还是成立', '依然成立', '沿用', '一致', '不变', '只要'];
+
+function continuation(o = {}) {
+  const rounds = Array.isArray(o.rounds) ? o.rounds : [];
+  const probes = Array.isArray(o.probes) ? o.probes : [];
+  const cs = (o.concepts || []).map(String);
+  const extendTalks = [];
+  const unanchored = [];
+  for (const r of rounds) {
+    const text = String(r.text || '');
+    for (const sent of text.split(/[。；;！!？?\n]/)) {
+      const s = sent.trim();
+      if (s.length < 6) continue;
+      const isExtend = CONT_EXTENSION_CUES.some((w) => s.indexOf(w) >= 0);
+      if (!isExtend) continue;
+      const mention = cs.find((c) => s.indexOf(c) >= 0) || null;
+      const rec = { concept: mention, sentence: s.slice(0, 40) };
+      extendTalks.push(rec);
+      const anchored = CONT_ANCHOR_CUES.some((w) => s.indexOf(w) >= 0);
+      if (!anchored) unanchored.push(rec);   // 推广没说清判据是否沿用 ⇒ 可能是偷换
+    }
+  }
+  const extendAsked = probes.filter((p) => p && p.type === 'extend').length;
+  const extendAnswered = probes.filter((p) => p && p.type === 'extend' && p.answer).length;
+
+  const line = extendTalks.length
+    ? `有 ${extendTalks.length} 处，你把概念往更大的地盘上搬：` +
+      extendTalks.map((g) => `「${g.sentence}」`).join('、') + `。` +
+      (unanchored.length
+        ? `其中 ${unanchored.length} 处**没说清判据**——解析延拓有一条铁律（恒等定理）：延拓若存在，必唯一，` +
+          `新旧地盘的取值必须自洽。判据没沿用，就可能不是推广，是偷换概念。`
+        : `而且都锚定了判据（新地盘沿用/说明了什么条件）——这正是延拓合法的样子。`)
+    : `这一段没发现"把概念往外推"的说法。等你开始说"广义的/推广的"时，这枚算子才开始工作。`;
+
+  const note =
+    `诚实边界：① 词面信号近似，"换个说法的延拓"没带广义/推广字样时会漏检；` +
+    `② 锚定词命中只说明"提了条件"，不验证条件真的一致——那是 LLM 层或更细粒度判据的事；` +
+    `③ 数学根（已证）：解析延拓的唯一性（恒等定理）——本算子只照"新旧判据是否被说清"，绝不判定推广本身对错（守 A2）。`;
+
+  return { ok: true, extendTalks, anchored: extendTalks.length - unanchored.length, unanchored, extendAsked, extendAnswered, line, note };
+}
+
+module.exports = { buildAnswerFunction, answerFunctionShift, boundedness, representations, signPreservation, orderComparison, lawPremise, squeezeBounds, cauchyConvergence, inductionGap, continuation, sigOf, BOUND_CUES };
