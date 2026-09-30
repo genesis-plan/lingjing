@@ -1689,6 +1689,17 @@ function createSession(lesson, { maxRounds = 4, world } = {}) {
         }), 'utf-8');
         onLog(`《今天那面镜子》（分享卡，可直接保存/转发）已写出 → ${cardFile}`);
       } catch (ce) { onLog(`分享卡生成失败（不阻塞课堂）：${String((ce && ce.message) || ce)}`); }
+      // 带走的卡：把这一课的可观测事实落成结构化 JSON（/api/cards/* 与 public/cards.html 的数据源）。
+      // 只存观测（镜子问的/你说的/没讲到的），无评分字段，守 A2；失败不阻塞课堂，守 A4。
+      try {
+        const cardsFile = path.join(dir, `${base}-cards.json`);
+        fs.writeFileSync(cardsFile, JSON.stringify({
+          lessonTitle,
+          date: new Date().toISOString().slice(0, 10),
+          result: { concepts, probes, rounds, mineRounds, uncovered: (gains && gains.uncovered) || [] },
+        }, null, 2), 'utf-8');
+        onLog(`「带走的卡」数据已写出 → ${cardsFile}`);
+      } catch (ce) { onLog(`「带走的卡」数据写出失败（不阻塞课堂）：${String((ce && ce.message) || ce)}`); }
       // 世界对象本身持久化（R-M2 修复：world.save 原语已落，此处接入会话生命周期）
       worldPath = path.join(dir, `${base}-world.json`);
       try { w.save(worldPath); onLog(`世界状态已持久化 → ${worldPath}（T=${w.T}）`); }

@@ -12,6 +12,7 @@ const { createSession, runClassroom, parseLesson } = require('./teacher.js');
 const { World } = require('./world.js');
 const { getStrangerId, recordVisit } = require('./retention.js'); // R-A1 身份 + R1 留存埋点
 const llm = require('./llm.js'); // 硅基流动按功能组合（对话/推理/翻译/配图/语音/OCR）
+const cardsRoutes = require('./cards-routes.js'); // 带走的卡 API（镜像卡/盲区账本/会回来的卡）
 
 const PORT = process.env.PORT || 8080;
 
@@ -400,6 +401,12 @@ const server = http.createServer((req, res) => {
       res.end(JSON.stringify({ ok: !!out, model: llm.sfModel('asr'), text: out }));
     });
     req.on('error', () => {});
+    return;
+  }
+
+  // 带走的卡 API（GET/POST /api/cards/*；自带软限流与防穿越；非卡片路径返回 false，不影响既有路由）
+  if (cardsRoutes.isCards(req.url)) {
+    cardsRoutes.handle(req, res).catch((e) => { console.error('[cards]', e && e.message); });
     return;
   }
 

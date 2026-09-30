@@ -66,8 +66,8 @@ ok('卡片是合法 SVG', svg.indexOf('<svg') === 0 && svg.lastIndexOf('</svg>')
 ok('卡片含转载钩子（看到的人想要自己那张）', svg.indexOf('讲一遍，你也能拿到自己那张') >= 0);
 
 // ── ⑦ 卡片数字＝计数，且取自 mineRounds（不是镜子那一侧） ─────────────
-ok('卡片轮数取自 mineRounds 且数字为真值', svg.indexOf('>' + rounds.length + '<') >= 0, '期望 ' + rounds.length);
-ok('卡片盲区数为真值', svg.indexOf('>' + result.uncovered.length + '<') >= 0);
+ok('卡片轮数取自 mineRounds 且数字为真值（v3：计数行）', svg.indexOf(rounds.length + ' 轮讲授') >= 0, '期望 ' + rounds.length);
+ok('卡片盲区数为真值（v3：盲区以还开着的问题原文呈现）', svg.indexOf('「' + result.uncovered[0] + '」你提到了') >= 0);
 
 // ── ⑧ 空输入不崩 ──────────────────────────────────────────────
 let crashed = '';

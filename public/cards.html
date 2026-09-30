@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>灵境 · 带走的卡</title>
+<style>
+  :root{ --ink:#4f46e5; --line:#e5e7eb; --fg:#1f2330; --mut:#6b7280; }
+  *{box-sizing:border-box}
+  body{margin:0;background:#eef1f6;font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;color:var(--fg);
+       display:flex;flex-direction:column;align-items:center;padding:22px 14px}
+  h1{font-size:17px;margin:0 0 14px;letter-spacing:2px}
+  .tabs{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;justify-content:center}
+  .tabs button{background:#fff;border:1px solid var(--line);border-radius:999px;padding:8px 16px;font-size:13.5px;cursor:pointer;color:var(--mut)}
+  .tabs button.on{background:var(--ink);border-color:var(--ink);color:#fff;font-weight:600}
+  .panel{display:none;width:100%;max-width:980px}
+  .panel.on{display:block}
+  .cards{display:flex;gap:22px;flex-wrap:wrap;justify-content:center}
+  .card{background:#fff;border-radius:22px;box-shadow:0 8px 30px rgba(31,35,48,.10);overflow:hidden}
+  .card svg{display:block;width:min(92vw,420px);height:auto}
+  .bar{display:flex;gap:10px;justify-content:center;margin:10px 0 4px;flex-wrap:wrap}
+  button.act{background:var(--ink);color:#fff;border:0;border-radius:10px;padding:9px 16px;font-size:13.5px;font-weight:600;cursor:pointer}
+  button.ghost{background:#fff;color:var(--ink);border:1px solid var(--line)}
+  select{padding:8px 12px;border-radius:10px;border:1px solid var(--line);font-size:13.5px}
+  .tip{font-size:12px;color:var(--mut);text-align:center;line-height:1.7;margin-top:8px}
+  .empty{background:#fff;border:1px dashed var(--line);border-radius:14px;padding:22px;text-align:center;color:var(--mut);font-size:14px}
+  .qcard{background:#fff;border:1px solid var(--line);border-radius:16px;padding:16px 18px;margin:10px auto;max-width:620px}
+  .qcard .q{font-size:16px;font-weight:500;line-height:1.6}
+  .qcard .meta{font-size:11.5px;color:#7F77DD;margin-top:6px}
+  .qcard .ops{display:flex;gap:10px;margin-top:12px}
+  .gap-item{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 15px;margin:8px auto;max-width:680px;font-size:14px;display:flex;justify-content:space-between;gap:10px}
+  .gap-item .st{font-size:12px;white-space:nowrap;color:var(--mut)}
+  .gap-item.closed{border-color:#a7f3c3;background:#f0fff4}
+  .counts{display:flex;gap:10px;justify-content:center;margin:12px 0}
+  .counts div{background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px 22px;text-align:center}
+  .counts .n{font-size:22px;font-weight:600}
+  .counts .l{font-size:11px;color:var(--mut)}
+</style>
+</head>
+<body>
+  <h1>灵境 · 带走的卡</h1>
+  <div class="tabs">
+    <button data-p="p-share" class="on">带走卡</button>
+    <button data-p="p-due">会回来的卡</button>
+    <button data-p="p-ledger">盲区账本</button>
+  </div>
+
+  <div class="panel on" id="p-share">
+    <div class="bar"><select id="sel"></select><button class="act" id="btn-render">生成我的卡</button></div>
+    <div class="cards" id="share-cards"></div>
+    <div class="bar" id="share-dl" style="display:none">
+      <button class="act" id="dl-a">下载 单课镜面卡</button>
+      <button class="act" id="dl-b">下载 盲区卡</button>
+    </div>
+    <div class="tip">卡上的数字全是计数，没有一处评分；每句话都是你自己说过的。<br>存图：卡片上右键 →「存储图像」，或用截图。</div>
+  </div>
+
+  <div class="panel" id="p-due">
+    <div id="due-list"></div>
+    <div class="tip">「还没」不丢人——明天它会再来一次。这里没有红点，没有连续打卡，没有分数。</div>
+  </div>
+
+  <div class="panel" id="p-ledger">
+    <div class="counts" id="led-counts"></div>
+    <div id="led-list"></div>
+    <div class="tip">只增不改的账本：每条缝记着哪天开的、哪天你讲圆了。没有掌握度，没有百分比。</div>
+  </div>
+
+<script>
+'use strict';
+var state = { sessions: [], share: null };
+
+function $(s){ return document.querySelector(s); }
+function el(tag, cls, text){ var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+function jget(u){ return fetch(u).then(function(r){ return r.json(); }); }
+function jpost(u, body){ return fetch(u, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(function(r){ return r.json(); }); }
+
+// ── 标签页 ──
+document.querySelectorAll('.tabs button').forEach(function(b){
+  b.addEventListener('click', function(){
+    document.querySelectorAll('.tabs button').forEach(function(x){ x.classList.remove('on'); });
+    document.querySelectorAll('.panel').forEach(function(x){ x.classList.remove('on'); });
+    b.classList.add('on'); $('#' + b.dataset.p).classList.add('on');
+    if (b.dataset.p === 'p-due') loadDue();
+    if (b.dataset.p === 'p-ledger') loadLedger();
+  });
+});
+
+// ── 带走卡 ──
+function loadSessions(){
+  jget('/api/cards/sessions').then(function(d){
+    state.sessions = d.sessions || [];
+    var sel = $('#sel'); sel.innerHTML = '';
+    if (!state.sessions.length){ $('#share-cards').innerHTML = ''; $('#share-cards').appendChild(el('div','empty', d.honestEmpty || '空着不编。')); return; }
+    state.sessions.forEach(function(s){
+      var o = document.createElement('option');
+      o.value = s.file; o.textContent = (s.date || '—') + ' · ' + s.lessonTitle;
+      sel.appendChild(o);
+    });
+    render();
+  });
+}
+function render(){
+  var f = $('#sel').value; if (!f) return;
+  jget('/api/cards/share?file=' + encodeURIComponent(f)).then(function(d){
+    if (!d.ok){ $('#share-cards').innerHTML = ''; $('#share-cards').appendChild(el('div','empty', d.error || '空着不编。')); return; }
+    state.share = d;
+    var box = $('#share-cards'); box.innerHTML = '';
+    [d.lessonSvg, d.blindSvg].forEach(function(svg){
+      var w = el('div','card'); w.innerHTML = svg; box.appendChild(w);
+    });
+    $('#share-dl').style.display = 'flex';
+  });
+}
+function download(svg, name){
+  var b = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
+  var a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+$('#btn-render').addEventListener('click', render);
+$('#dl-a').addEventListener('click', function(){ if (state.share) download(state.share.lessonSvg, '灵境-认知镜像卡.svg'); });
+$('#dl-b').addEventListener('click', function(){ if (state.share) download(state.share.blindSvg, '灵境-盲区卡.svg'); });
+
+// ── 会回来的卡 ──
+function loadDue(){
+  jget('/api/cards/due').then(function(d){
+    var box = $('#due-list'); box.innerHTML = '';
+    var cards = d.cards || [];
+    if (!cards.length){ box.appendChild(el('div','empty','今天没有回来的问题。该干嘛干嘛去。')); return; }
+    cards.forEach(function(c){
+      var w = el('div','qcard');
+      w.appendChild(el('div','q', c.question));
+      w.appendChild(el('div','meta', '第 ' + (c.streak || 0) + ' 次重逢 · 最初问于 ' + c.firstAsked));
+      var ops = el('div','ops');
+      var yes = el('button','act','答到了'); var no = el('button','ghost','还没');
+      yes.addEventListener('click', function(){ answer(c.id, 'yes', w); });
+      no.addEventListener('click', function(){ answer(c.id, 'no', w); });
+      ops.appendChild(yes); ops.appendChild(no); w.appendChild(ops);
+      box.appendChild(w);
+    });
+  });
+}
+function answer(id, said, w){
+  jpost('/api/cards/answer', { id: id, said: said }).then(function(d){
+    if (!d.ok) return;
+    if (said === 'yes'){
+      w.innerHTML = '';
+      w.appendChild(el('div','q','✓ 答到了。这条进了你的闭环时刻——它改天会再来看你。'));
+    } else {
+      w.innerHTML = '';
+      w.appendChild(el('div','q','好。它明天再来。不着急。'));
+    }
+  });
+}
+
+// ── 盲区账本 ──
+function loadLedger(){
+  jget('/api/cards/ledger').then(function(d){
+    var counts = $('#led-counts'); counts.innerHTML = '';
+    [[d.openCount, '还没讲圆'], [d.closedCount, '已经讲圆'], [d.totalGaps, '累计照见']].forEach(function(p){
+      var box = el('div'); box.appendChild(el('div','n', String(p[0]))); box.appendChild(el('l' === 'l' ? 'div' : 'div','l', p[1])); counts.appendChild(box);
+    });
+    var box = $('#led-list'); box.innerHTML = '';
+    var gaps = d.gaps || [];
+    if (!gaps.length){ box.appendChild(el('div','empty', d.honestEmpty || '空着不编。')); return; }
+    gaps.forEach(function(g){
+      var w = el('div','gap-item' + (g.status === 'closed' ? ' closed' : ''));
+      var left = el('div'); left.appendChild(el('div', null, (g.kind === 'question' ? '追问 · ' : '缝 · ') + g.label));
+      left.appendChild(el('div','st', g.status === 'closed'
+        ? ('开于 ' + g.firstDate + ' · 讲圆于 ' + g.closedDate)
+        : ('开于 ' + g.firstDate + (g.lastSeenDate && g.lastSeenDate !== g.firstDate ? ' · 最近照见 ' + g.lastSeenDate : ''))));
+      w.appendChild(left);
+      w.appendChild(el('div','st', g.status === 'closed' ? '✓' : '还没'));
+      box.appendChild(w);
+    });
+  });
+}
+
+loadSessions();
+</script>
+</body>
+</html>
