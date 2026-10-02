@@ -8,6 +8,7 @@
 > **一间虚拟课室：人类给 AI 上课，AI 当一面镜子。**
 > 人讲 → AI 多角追问 → 人答 → **人自判** → 带走你的思考、盲区与总结。
 
+**English web version (no install, BYO-key):** <https://hongchenlingjing.com/lingjing-en/> — three personal uses: self-learner comprehension checks, a private knowledge library, your own experience made queryable. No signup; your API key stays in your browser and is never sent to any server ([BYO-key app](https://hongchenlingjing.com/lingjing-en/llm-byo.html)). Works with free models (OpenRouter free tier).
 
 **角色契约**：人类是体验者（也是传授者），AI 是激发者；**AI 不学习、不评分、不判定，判定权永远归人。**
 这不是产品态度，是**架构不变量**——世界模型 `World = ⟨S, R, M, T⟩` 里根本不存在「学生 → 分数」这条边。
