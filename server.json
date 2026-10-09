@@ -1,0 +1,22 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.genesis-plan/lingjing",
+  "title": "LingJing",
+  "description": "LingJing classroom MCP: human teaches, AI student questions; returns blindspots & summary.",
+  "version": "1.0.1",
+  "repository": {
+    "url": "https://github.com/genesis-plan/lingjing",
+    "source": "github"
+  },
+  "websiteUrl": "https://hongchenlingjing.com/",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "lingjing-classroom-mcp",
+      "version": "1.0.1",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}

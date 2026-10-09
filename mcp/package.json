@@ -1,0 +1,33 @@
+{
+  "name": "lingjing-classroom-mcp",
+  "version": "1.0.1",
+  "mcpName": "io.github.genesis-plan/lingjing",
+  "description": "LingJing classroom MCP — human teaches, the AI student questions; returns blindspots & summary. Deterministic, no LLM required.",
+  "type": "module",
+  "bin": {
+    "lingjing-classroom-mcp": "lingjing-classroom-mcp.js"
+  },
+  "files": [
+    "lingjing-classroom-mcp.js",
+    "server.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "classroom",
+    "teaching",
+    "reasoning",
+    "lingjing",
+    "灵境"
+  ],
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "zod": "^4.6.5"
+  }
+}

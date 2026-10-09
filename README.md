@@ -77,6 +77,32 @@ node tools/test_p0_wiring.mjs       # 盲区环端到端接线
 
 ---
 
+## 灵境 MCP · 给 AI Agent 的课室
+
+灵境除了本机网页课室，现已打包成 **MCP stdio server**（`lingjing-classroom-mcp`）——让任何支持 MCP 的 AI Agent / 编排器直接调用这间"课室"：人（或 Agent）讲授，灵境当学生追问，返回盲区与总结。
+
+**特性**：确定性引擎，**无需 LLM、无需联网、可离线复现**；fail-closed（无效会话直接报错）。与网页课室共享同一套"七类认知盲区"判定逻辑，但**不经过 LLM 嗓音层**，纯本地可复现。
+
+**一键接入（agents `npx` 即用）**
+
+```bash
+npx lingjing-classroom-mcp
+```
+
+四个工具：`lingjing_start_session`（开课）→ `lingjing_teach`（讲授 + 苏格拉底追问）→ `lingjing_reflect`（七维盲区 + 总结 + 卡片）→ `lingjing_close_session`（收尾并清理）。完整用法见 [`mcp/README.md`](mcp/README.md)。
+
+**发现 / 分发**
+
+| 渠道 | 状态 |
+|---|---|
+| 官方 MCP Registry | `io.github.genesis-plan/lingjing` v1.0.1（active · isLatest） |
+| npm | [`lingjing-classroom-mcp`](https://www.npmjs.com/package/lingjing-classroom-mcp) @1.0.1 |
+| Glama / HiMCP / LobeHub | 待自动收录（本仓已含 `server.json`，目录爬到即显） |
+
+> 包源码在 [`mcp/`](mcp/)；Registry 条目与 npm 包版本一致。许可同本仓 UNLICENSED（商用须书面授权）。
+
+---
+
 ## 文档
 
 | 文档 | 内容 |
@@ -107,6 +133,8 @@ retention.js         匿名留存埋点（只给离线脚本读，绝不进用�
 public/              课室前端（2D/3D）、双稿制反思、课后总结、跨课知识库、课前生产性失败
 tools/               23 个自动化测试 + 辅助脚本
 docs/                主题文档（本表）
+mcp/                 灵境 MCP stdio 包源码（给 AI Agent 的课室，见上）
+server.json          官方 MCP Registry 清单（目录/Glama/HiMCP 自动发现用）
 ```
 
 ---
