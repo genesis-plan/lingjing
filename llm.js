@@ -1,9 +1,11 @@
 // 灵境 LingJing — LLM 连接器（独立模块，多提供商）
 // ==================================================================
 // 2026-09-16 从 teacher.js 抽离（ENGINEERING.md §五 P1：提测试性）。
-// 2026-09-17 改多提供商：OpenRouter（默认，向后兼容） + 智谱 GLM-4.7-Flash（国内免费为主） + DeepSeek（低价备选）。
+// 2026-09-17 改多提供商：国内优先（siliconflow / 智谱 GLM-4.7-Flash / DeepSeek 境内）+ OpenRouter（境外，仅显式选用）。
+// 2026-10-09 合规整改：默认改为国内、不再默认出境；境外 OpenRouter 须用户显式指定 + 自带 key。
 //
-// 选择：LINGJING_LLM_PROVIDER = openrouter | zhipu | deepseek | siliconflow（默认 openrouter，保证 test_llm_wiring 不变）。
+// 选择：LINGJING_LLM_PROVIDER = siliconflow | zhipu | deepseek | openrouter
+//   （默认 siliconflow＝国内；无 key 则纯本地确定性。境外 OpenRouter 须显式指定 + 自带 key，绝不静默回落）。
 //   智谱：LINGJING_ZHIPU_KEY + 端点 open.bigmodel.cn（OpenAI 兼容），模型 glm-4.7-flash，免费无上限、200K 上下文、免费档 1 并发。
 //   硅基流动：LINGJING_SILICONFLOW_KEY + 端点 api.siliconflow.cn（OpenAI 兼容），一个 key 调 100+ 模型（国内节点稳）。
 //            ⚠️ 用真 key 实测（2026-09-18）筛出的【真免费】模型（DeepSeek-V3 / DeepSeek-R1 大模型属收费/限时免费档，已排除）：
@@ -88,8 +90,8 @@ const PROVIDERS = {
 };
 
 function activeName() {
-  const n = (process.env.LINGJING_LLM_PROVIDER || 'openrouter').toLowerCase();
-  return PROVIDERS[n] ? n : 'openrouter';
+  const n = (process.env.LINGJING_LLM_PROVIDER || 'siliconflow').toLowerCase();
+  return PROVIDERS[n] ? n : 'siliconflow';
 }
 const ACTIVE = PROVIDERS[activeName()];
 
@@ -160,8 +162,8 @@ async function sfChat(fn, system, user, opts = {}) {
       : undefined;
     txt = await SF._limit(() => oneCall(SF, f.model, system, user, { ...opts, messages }));
   }
-  // 硅基流动无 key / 返回空 → 国外免费模型兜底（仍全免费）
-  if (!txt) txt = await orFreeChat(system, user, opts);
+  // 仅当用户显式选择 openrouter（境外）时才回落其免费档；其余情况绝不静默把课堂文本发往境外
+  if (!txt && ACTIVE.kind === 'openrouter') txt = await orFreeChat(system, user, opts);
   // 仍空 → 当前 ACTIVE 提供商（如智谱免费档）顶上（2026-09-25 补）：
   //   实测教训——环境只有 ZHIPU_API_KEY、没有 SF/OR key 时，课堂镜子两级回退全部空转，
   //   兜底语料接管，而 llmStatus 还报 usable=true，极具迷惑性。镜子不应因单一渠道缺 key 而全哑。

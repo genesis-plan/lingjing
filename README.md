@@ -35,10 +35,16 @@ node server.js          # → http://localhost:8080
 
 > **不配任何密钥也能跑**：走确定性兜底语料，流程完整、体验降级、**全程零外发**。
 
-**② 想让 AI 学生说人话（可选）**
+**② 想让 AI 学生说人话（可选，须自带 key）**
 
 ```bash
-# 默认 OpenRouter（境外）
+# 默认硅基流动（国内，数据不出境）；须自带 key
+LINGJING_LLM_PROVIDER=siliconflow LINGJING_SILICONFLOW_KEY=xxx node server.js
+
+# 或换其他境内提供商
+LINGJING_LLM_PROVIDER=zhipu LINGJING_ZHIPU_KEY=xxx node server.js
+
+# 仅当你明确要用境外 OpenRouter 时才指定（课堂文本将出境，须自担合规）
 LINGJING_LLM_PROVIDER=openrouter LINGJING_OR_KEY=sk-or-v1-xxx node server.js
 
 # 或换境内提供商（数据不出境）
