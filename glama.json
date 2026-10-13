@@ -1,0 +1,19 @@
+{
+  "$schema": "https://glama.ai/mcp/schema/manifest.json",
+  "name": "LingJing Classroom",
+  "description": "LingJing classroom MCP — a human teaches, an AI student questions back, then receives a blindspot report and a session summary. Deterministic (no LLM required): 7 cognitive-dimension blindspot detection, reproducible, fail-closed, zero data upload. Local stdio, zero install: npx -y lingjing-classroom-mcp.",
+  "homepage": "https://hongchenlingjing.com/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/genesis-plan/lingjing"
+  },
+  "license": "SEE LICENSE IN LICENSE",
+  "version": "1.0.1",
+  "mcpServers": {
+    "lingjing-classroom-mcp": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "lingjing-classroom-mcp"]
+    }
+  }
+}
