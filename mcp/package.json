@@ -1,8 +1,8 @@
 {
   "name": "lingjing-classroom-mcp",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "mcpName": "io.github.genesis-plan/lingjing",
-  "description": "LingJing Classroom — a DETERMINISTIC knowledge & blindspot MCP for AI agents (NO neural net, cannot hallucinate): a teaching loop that returns 7-dimension blindspots + summary. Independent gap-check layer, never grades.",
+  "description": "LingJing Classroom — a deterministic (no-LLM) knowledge & blindspot MCP for AI agents: a teaching loop that returns 7-dimension blindspots and a summary. An independent gap-check layer, never hallucinates, never grades.",
   "type": "module",
   "bin": {
     "lingjing-classroom-mcp": "lingjing-classroom-mcp.js"
@@ -20,7 +20,11 @@
     "teaching",
     "reasoning",
     "lingjing",
-    "灵境"
+    "灵境",
+    "blindspot",
+    "knowledge-check",
+    "no-hallucination",
+    "deterministic"
   ],
   "license": "UNLICENSED",
   "engines": {
