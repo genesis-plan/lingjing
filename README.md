@@ -95,14 +95,14 @@ node tools/test_p0_wiring.mjs       # 盲区环端到端接线
 npx lingjing-classroom-mcp
 ```
 
-四个工具：`lingjing_start_session`（开课）→ `lingjing_teach`（讲授 + 苏格拉底追问）→ `lingjing_reflect`（七维盲区 + 总结 + 卡片）→ `lingjing_close_session`（收尾并清理）。完整用法见 [`mcp/README.md`](mcp/README.md)。
+单网关工具 `lingjing`：`action` ∈ `start_session`（开课）→ `teach`（讲授 + 苏格拉底追问）→ `reflect`（七维盲区 + 总结 + 卡片）→ `close_session`（收尾并清理）。完整用法见 [`mcp/README.md`](mcp/README.md)。
 
 **发现 / 分发**
 
 | 渠道 | 状态 |
 |---|---|
-| 官方 MCP Registry | `io.github.genesis-plan/lingjing` v1.0.1（active · isLatest） |
-| npm | [`lingjing-classroom-mcp`](https://www.npmjs.com/package/lingjing-classroom-mcp) @1.0.1 |
+| 官方 MCP Registry | `io.github.genesis-plan/lingjing` v1.0.2（active · isLatest） |
+| npm | [`lingjing-classroom-mcp`](https://www.npmjs.com/package/lingjing-classroom-mcp) @1.0.2 |
 | Glama / HiMCP / LobeHub | 待自动收录（本仓已含 `server.json`，目录爬到即显） |
 
 > 包源码在 [`mcp/`](mcp/)；Registry 条目与 npm 包版本一致。许可同本仓 UNLICENSED（商用须书面授权）。

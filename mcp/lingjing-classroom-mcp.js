@@ -77,7 +77,7 @@ function fail(msg) {
 }
 
 // ---------- MCP Server ----------
-const server = new McpServer({ name: "lingjing-classroom-mcp", version: "1.0.0" });
+const server = new McpServer({ name: "lingjing-classroom-mcp", version: "1.0.2" });
 
 // 单网关：把 4 个动作收编进 1 个工具（对齐灵脑 lingnao 网关 + 减小工具暴露面/每轮 token 预算）
 server.tool(

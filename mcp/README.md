@@ -25,12 +25,33 @@ npx lingjing-classroom-mcp
 
 ## 工具
 
-| 工具 | 作用 |
-|---|---|
-| `lingjing_start_session` | 开课室，返回 `sessionId` |
-| `lingjing_teach` | 老师授课：把内容发给 AI 学生，返回苏格拉底式追问 |
-| `lingjing_reflect` | 课后反思：返回盲区（未覆盖的认知维度）、总结、可带走的卡 |
-| `lingjing_close_session` | 下课：关闭课室并交回最终总结 |
+单网关工具，所有动作收编进一个 `lingjing` 工具，用 `action` 区分：
+
+| `action` | `args` | 作用 |
+|---|---|---|
+| `start_session` | `{ title? }` | 开课室，返回 `sessionId` |
+| `teach` | `{ sessionId, content }` | 老师授课：把内容发给 AI 学生，返回苏格拉底式追问 |
+| `reflect` | `{ sessionId }` | 课后反思：返回盲区（未覆盖的认知维度）、总结、可带走的卡 |
+| `close_session` | `{ sessionId }` | 下课：关闭课室、清空会话并交回最终总结 |
+
+**调用示例（MCP `tools/call`）**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "lingjing",
+    "arguments": {
+      "action": "teach",
+      "args": { "sessionId": "<上一步返回的 sessionId>", "content": "数学公式在计算时要注意边界值；因果关系导致结果变化，要区分相关和因果。" }
+    }
+  }
+}
+```
+
+> 无效或已关闭的 `sessionId` 会走 fail-closed：返回 `isError` 报错，不会编造结论。
 
 ## 设计说明
 
